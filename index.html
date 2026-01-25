@@ -790,6 +790,108 @@
     pointer-events:none;
   }
   .exploration-pop.hidden{ display:none; }
+
+  .player-fan.exploration-reveal{
+    transform:translate(-50%,-50%) scale(1.4);
+    z-index:60;
+  }
+  .my-hand-row.exploration-reveal{
+    transform:translateY(30px) scale(1.4);
+    z-index:60;
+  }
+  .mini-card.exploration-front,
+  .ruins-card.exploration-front{
+    background:#fff;
+    color:#111;
+    font-weight:900;
+    font-size:14px;
+  }
+  .mini-card.exploration-front{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .ruins-card.exploration-front{
+    color:#111;
+  }
+
+  @keyframes explorationFlip{
+    0%{ transform:rotateY(0deg); }
+    40%{ transform:rotateY(180deg); color:transparent; background:linear-gradient(135deg,#e5e7eb,#cbd5f5); }
+    70%{ transform:rotateY(260deg); }
+    100%{ transform:rotateY(360deg); color:#111; background:#fff; }
+  }
+  .my-hand-row.exploration-flip .my-card{
+    animation: explorationFlip 900ms ease-in-out 1;
+    transform-style:preserve-3d;
+    backface-visibility:hidden;
+  }
+
+  @keyframes explorationShake{
+    0%{ transform:translate(-50%,-50%) scale(1.4) rotate(0deg); }
+    20%{ transform:translate(-50%,-50%) scale(1.4) rotate(4deg); }
+    40%{ transform:translate(-50%,-50%) scale(1.4) rotate(-4deg); }
+    60%{ transform:translate(-50%,-50%) scale(1.4) rotate(3deg); }
+    80%{ transform:translate(-50%,-50%) scale(1.4) rotate(-3deg); }
+    100%{ transform:translate(-50%,-50%) scale(1.4) rotate(0deg); }
+  }
+  @keyframes explorationShakeMe{
+    0%{ transform:translateY(30px) scale(1.4) rotate(0deg); }
+    20%{ transform:translateY(30px) scale(1.4) rotate(4deg); }
+    40%{ transform:translateY(30px) scale(1.4) rotate(-4deg); }
+    60%{ transform:translateY(30px) scale(1.4) rotate(3deg); }
+    80%{ transform:translateY(30px) scale(1.4) rotate(-3deg); }
+    100%{ transform:translateY(30px) scale(1.4) rotate(0deg); }
+  }
+  .player-fan.exploration-shake{ animation: explorationShake 520ms ease-in-out infinite; }
+  .my-hand-row.exploration-shake{ animation: explorationShakeMe 520ms ease-in-out infinite; }
+
+  .mini-card.exploration-pickable{
+    pointer-events:auto;
+    cursor:pointer;
+    animation: fanPickPulse 720ms ease-in-out infinite;
+    outline:2px solid rgba(37,99,235,.0);
+  }
+  .mini-card.exploration-pickable:hover{
+    outline:2px solid rgba(37,99,235,.55);
+  }
+  .ruins-card.exploration-pickable{
+    pointer-events:auto;
+    cursor:pointer;
+    animation: ruinsPulse 760ms ease-in-out infinite;
+    outline:2px solid rgba(37,99,235,.0);
+  }
+  .ruins-card.exploration-pickable:hover{
+    outline:2px solid rgba(37,99,235,.55);
+  }
+
+  .exploration-center-card{
+    position:fixed;
+    left:50%;
+    top:50%;
+    width:140px;
+    height:210px;
+    border-radius:14px;
+    border:2px solid rgba(37,99,235,.15);
+    background:#fff;
+    box-shadow:0 22px 56px rgba(0,0,0,.35);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:56px;
+    font-weight:1000;
+    transform:translate(-50%,-50%) scale(1.12);
+    opacity:0;
+    z-index:998;
+  }
+  @keyframes explorationFall{
+    0%{ transform:translate(-50%,-50%) scale(1.12) rotate(0deg); opacity:1; }
+    20%{ transform:translate(-50%,-50%) scale(1.12) rotate(-8deg); opacity:1; }
+    100%{ transform:translate(-50%, calc(-50% + 220px)) scale(0.92) rotate(14deg); opacity:0; }
+  }
+  .exploration-center-card.drop{
+    animation: explorationFall 720ms ease-in forwards;
+  }
 </style>
 </head>
 <body>
@@ -1126,11 +1228,226 @@ function hideGameOver(){
   gameOverPop.classList.add('hidden');
 }
 
-function showExplorationFace(){
+async function showExplorationFace(){
   explorationPop.classList.remove('hidden');
-  setTimeout(() => {
-    explorationPop.classList.add('hidden');
-  }, 1000);
+  await sleep(1000);
+  explorationPop.classList.add('hidden');
+}
+
+let explorationSequenceActive = false;
+let explorationSelectionCleanup = null;
+let explorationSelectionTimer = null;
+
+function getCardRank(value){
+  if (value === null || value === undefined) return null;
+  const v = String(value);
+  if (v === 'x' || v === '✕') return 99;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 99;
+}
+
+function getExplorationGroups(){
+  const groups = new Map();
+  latestPlayers.forEach((p) => {
+    if (state.eliminated?.[p.id]) return;
+    const hand = state.hands?.[p.id];
+    const cards = Array.isArray(hand?.cards) ? hand.cards : [];
+    if (!cards.length) return;
+    const ranks = cards.map(getCardRank).filter((v) => v !== null);
+    if (!ranks.length) return;
+    const minRank = Math.min(...ranks);
+    if (!groups.has(minRank)) groups.set(minRank, []);
+    groups.get(minRank).push(p.id);
+  });
+
+  return [...groups.entries()]
+    .sort((a,b) => a[0] - b[0])
+    .map(([rank, players]) => ({ rank, players }));
+}
+
+function setPlayerHandReveal(playerId, active, { flip = false } = {}){
+  if (playerId === state.userId){
+    myHandRow.classList.toggle('exploration-reveal', active);
+    if (flip && active){
+      myHandRow.classList.add('exploration-flip');
+      setTimeout(() => myHandRow.classList.remove('exploration-flip'), 920);
+    } else {
+      myHandRow.classList.remove('exploration-flip');
+    }
+    return;
+  }
+
+  const fan = playerCircle.querySelector(`.player-fan[data-pid="${playerId}"]`);
+  if (!fan) return;
+  fan.classList.toggle('exploration-reveal', active);
+  const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
+  const miniCards = fan.querySelectorAll('.mini-card');
+  miniCards.forEach((card, idx) => {
+    if (active){
+      card.classList.add('exploration-front');
+      card.textContent = String(cards[idx] ?? '');
+    } else {
+      card.classList.remove('exploration-front');
+      card.textContent = '';
+    }
+  });
+}
+
+function setExplorationShake(playerId, active){
+  if (playerId === state.userId){
+    myHandRow.classList.toggle('exploration-shake', active);
+    return;
+  }
+  const fan = playerCircle.querySelector(`.player-fan[data-pid="${playerId}"]`);
+  if (!fan) return;
+  fan.classList.toggle('exploration-shake', active);
+}
+
+function revealExplorationCardFront(el, value){
+  if (!el) return;
+  el.classList.add('exploration-front');
+  el.textContent = String(value ?? '');
+}
+
+function clearExplorationPickedCard(){
+  const picked = playerCircle.querySelector('.exploration-picked');
+  if (!picked) return;
+  picked.classList.remove('exploration-picked');
+  picked.classList.remove('exploration-front');
+  picked.textContent = '';
+}
+
+function cleanupExplorationSelection(){
+  if (explorationSelectionCleanup) explorationSelectionCleanup();
+  explorationSelectionCleanup = null;
+  if (explorationSelectionTimer){
+    clearTimeout(explorationSelectionTimer);
+    explorationSelectionTimer = null;
+  }
+}
+
+function waitForExplorationSelection(activePlayerId){
+  if (activePlayerId !== state.userId) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    const pickables = [];
+    const otherMiniCards = playerCircle.querySelectorAll(`.player-fan:not([data-pid="${state.userId}"]) .mini-card`);
+    otherMiniCards.forEach((el) => {
+      if (el.dataset.value) pickables.push(el);
+    });
+    const ruinCards = playerCircle.querySelectorAll('.ruins-card');
+    ruinCards.forEach((el) => {
+      if (el.dataset.value) pickables.push(el);
+    });
+
+    if (!pickables.length){
+      resolve(null);
+      return;
+    }
+
+    let resolved = false;
+    const listeners = [];
+
+    const finalize = (selection) => {
+      if (resolved) return;
+      resolved = true;
+      cleanupExplorationSelection();
+      resolve(selection);
+    };
+
+    const cleanup = () => {
+      listeners.forEach(({ el, handler }) => {
+        el.removeEventListener('click', handler);
+        el.classList.remove('exploration-pickable');
+      });
+    };
+
+    explorationSelectionCleanup = cleanup;
+
+    pickables.forEach((el) => {
+      el.classList.add('exploration-pickable');
+      const handler = (ev) => {
+        ev.stopPropagation();
+        const value = el.dataset.value;
+        el.classList.add('exploration-picked');
+        revealExplorationCardFront(el, value);
+        finalize({ value });
+      };
+      el.addEventListener('click', handler, { once:true });
+      listeners.push({ el, handler });
+    });
+
+    explorationSelectionTimer = setTimeout(() => {
+      finalize(null);
+    }, 12000);
+  });
+}
+
+async function animateExplorationCenterDrop(value){
+  const card = document.createElement('div');
+  card.className = 'exploration-center-card';
+  card.textContent = String(value ?? '');
+  document.body.appendChild(card);
+
+  await sleep(0);
+  card.style.opacity = '1';
+  card.style.transition = 'opacity 180ms ease';
+  await sleep(1500);
+
+  card.classList.add('drop');
+  await sleep(760);
+  card.remove();
+}
+
+async function handleExplorationSelection(value){
+  if (!value) return;
+  if (String(value) === '5'){
+    await animateGlobalFiveSlide();
+    clearExplorationPickedCard();
+    return;
+  }
+  await animateExplorationCenterDrop(value);
+  clearExplorationPickedCard();
+}
+
+async function runExplorationPhaseSequence(){
+  if (explorationSequenceActive) return;
+  explorationSequenceActive = true;
+
+  try{
+    await showExplorationFace();
+    await sleep(2000);
+
+    const groups = getExplorationGroups();
+    for (const group of groups){
+      if (!group.players.length) continue;
+
+      if (group.players.length > 1){
+        group.players.forEach((pid) => setPlayerHandReveal(pid, true));
+        await sleep(180);
+        group.players.forEach((pid) => setExplorationShake(pid, true));
+        await sleep(1500);
+        group.players.forEach((pid) => setExplorationShake(pid, false));
+        group.players.forEach((pid) => setPlayerHandReveal(pid, false));
+        continue;
+      }
+
+      const pid = group.players[0];
+      setPlayerHandReveal(pid, true, { flip: pid === state.userId });
+
+      if (pid === state.userId){
+        const selection = await waitForExplorationSelection(pid);
+        await handleExplorationSelection(selection?.value);
+      } else {
+        await sleep(2000);
+      }
+
+      setPlayerHandReveal(pid, false);
+    }
+  } finally {
+    cleanupExplorationSelection();
+    explorationSequenceActive = false;
+  }
 }
 
 let isRenderingSeatTabs = false;
@@ -1687,7 +2004,7 @@ function subscribeExplorationFaceEvent(){
     const now = Date.now();
     if (ev.at && (now - ev.at) > 20000) return;
 
-    showExplorationFace();
+    runExplorationPhaseSequence();
   });
 }
 
@@ -4140,6 +4457,7 @@ function renderRuinsArea(){
     const card = document.createElement('div');
     card.className = 'ruins-card';
     card.dataset.i = String(i);
+    card.dataset.value = String(item ?? '');
     card.textContent = '';
 
     if (mine7Picking){
@@ -4323,10 +4641,11 @@ function renderPlayerCircle(players){
       }
 
       const handData = state.hands[p.id];
+      const handCards = Array.isArray(handData?.cards) ? handData.cards : [];
       const miniHand = document.createElement('div');
       miniHand.className = 'mini-hand';
 
-      const count = Array.isArray(handData?.cards) ? handData.cards.length : 0;
+      const count = handCards.length;
       const spread = 78;
       const base = (count > 1) ? (-spread/2) : 0;
 
@@ -4339,6 +4658,7 @@ function renderPlayerCircle(players){
         card.style.setProperty('--rot', `${angleDeg}deg`);
         card.style.transform = `translate(-50%,0) rotate(${angleDeg}deg)`;
         card.style.zIndex = String(10 + i2);
+        card.dataset.value = String(handCards[i2] ?? '');
 
         // ★③/④：使用者が選択中なら pickable
         if (pickMode && !isElim){
