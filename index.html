@@ -170,11 +170,11 @@
   /* 山札：遺跡(2x3)の左 */
   .deck-pile{
     position:absolute;
-    top:50%;
-    left:calc(50% - 124px);
+    top:calc(50% + 14px);
+    left:calc(50% - 108px);
     transform:translate(-50%,-50%);
-    width:24px;height:33px;
-    border-radius:4px;
+    width:42px;height:62px;
+    border-radius:10px;
     border:1px solid #bbb;
     background:linear-gradient(135deg,#e5e7eb,#cbd5f5);
     box-shadow:0 6px 16px rgba(0,0,0,.18);
@@ -198,8 +198,8 @@
   /* 共通：裏カードの飛び（他プレイヤーにも見せる） */
   .draw-flyer, .back-flyer{
     position:fixed;
-    width:24px;height:33px;
-    border-radius:4px;
+    width:42px;height:62px;
+    border-radius:10px;
     border:1px solid rgba(0,0,0,.2);
     background:linear-gradient(135deg,#e5e7eb,#cbd5f5);
     box-shadow:0 18px 40px rgba(0,0,0,.28);
@@ -227,7 +227,7 @@
 
   .reshuffle-flyer{
     position:fixed;
-    width:36px;height:54px;border-radius:8px;
+    width:42px;height:62px;border-radius:10px;
     border:1px solid rgba(0,0,0,.18);
     background:linear-gradient(135deg,#e5e7eb,#cbd5f5);
     box-shadow:0 18px 40px rgba(0,0,0,.28);
@@ -670,9 +670,10 @@
     pointer-events:none;
   }
   .global-x-backdrop.hidden{ display:none; }
-  @keyframes xFallAway{
-    0%{ transform:perspective(600px) rotateX(0deg) translateY(0) scale(1); opacity:1; }
-    100%{ transform:perspective(600px) rotateX(68deg) translateY(90px) scale(0.9); opacity:.35; }
+  @keyframes xSlideUp{
+    0%{ transform:translateY(38vh) scale(0.95); opacity:0; }
+    70%{ transform:translateY(0) scale(1.05); opacity:1; }
+    100%{ transform:translateY(0) scale(1); opacity:1; }
   }
   .global-x-card{
     width:160px;height:240px;border-radius:16px;
@@ -680,10 +681,10 @@
     box-shadow:0 22px 56px rgba(0,0,0,.42);
     display:flex;align-items:center;justify-content:center;
     font-size:64px;font-weight:1000;
-    transform-origin:center bottom;
+    opacity:0;
   }
-  .global-x-card.fall-away{
-    animation: xFallAway 520ms ease-in forwards;
+  .global-x-card.slide-in{
+    animation: xSlideUp 720ms cubic-bezier(.22,.84,.44,1) forwards;
   }
 
   /* ===== 全員：1拡大 ===== */
@@ -762,7 +763,7 @@
 
     <div class="my-hand-wrapper">
       <div class="my-hand-row" id="myHandRow">
-        <div id="myIdentity" class="my-card my-identity-card hidden">？</div>
+        <div id="myIdentity" class="my-card my-identity-card hidden"></div>
         <div id="myHand" class="my-hand"></div>
       </div>
     </div>
@@ -807,7 +808,7 @@
     <button id="btnStartPopClose" class="btn ghost" style="padding:2px 6px;font-size:12px;">×</button>
   </div>
   <div class="start-pop-main">
-    「スタート」で <b>手札(各1枚)</b> ＋ <b>正体カード(各1枚)</b> を配布し、<br>
+    「スタート」で <b>手札(各1枚)</b> を配布し、<br>
     さらに <b>最初のプレイヤーに1枚ドロー</b> します。<br>
     ※「自分の手番」かつ「手札が2枚」の時だけ、パルス＆ドラッグ可。<br>
     ※ドロー演出は <b>全員の画面</b> に出ます。<br>
@@ -1000,7 +1001,7 @@ const ROLE_HELP = [
   { name: "（6）", text: "追加で1枚ドロー → 手札大小 → 1枚をドラッグして遺跡(2x3順番)へ配置" },
   { name: "（7）", text: "遺跡カード全て大小 → 1枚選んで手札へ → 手札大小＆ドラッグ → 空いた遺跡スロットへ配置" },
   { name: "（8）", text: "他プレイヤーの扇カードが大小アニメ → 1枚選ぶと点線矢印表示 → そのカードが自分の手札へ移動 → 自分の手札が大小＆ドラッグ可 → さっき選んだ相手にドラッグで渡す（他プレイヤーには裏向き移動表示）" },
-  { name: "（x）", text: "プレイしても何も起きない。③/⑧で見られた場合、③/⑧効果を消して、全員に✕を拡大表示→この✕を所有者の捨て札へ→所有者は脱落（以後手番スキップ＆ドローなし）。" },
+  { name: "（x）", text: "プレイしても何も起きない。③/⑧で見られた場合、③/⑧効果を消して、全員に✕を拡大表示→✕カードを所有者の捨て札へ→③/⑧プレイ者の手札を✕所有者へ移動→③/⑧プレイ者は脱落（以後手番スキップ＆ドローなし）。" },
 ];
 
 function renderHelpList(){
@@ -1595,15 +1596,9 @@ function subscribeOneRevealEvent(){
 }
 
 function renderMyIdentity(){
-  const myId = state.userId;
-  const identity = state.hands[myId]?.identity;
-  if (!identity){
-    myIdentityEl.classList.add('hidden');
-    myIdentityEl.textContent = '？';
-    return;
-  }
-  myIdentityEl.classList.remove('hidden');
-  myIdentityEl.textContent = identity;
+  if (!myIdentityEl) return;
+  myIdentityEl.classList.add('hidden');
+  myIdentityEl.textContent = '';
 }
 
 /* ドラッグ状態（通常プレイ） */
@@ -2535,21 +2530,18 @@ async function animateGlobalFiveSlide(){
   card.remove();
 }
 
-/* ★全員：✕拡大→倒れる */
+/* ★全員：✕拡大→下から中央へ */
 async function animateGlobalXReveal(){
   globalXBackdrop.classList.remove('hidden');
 
   const card = document.getElementById('globalXCard');
   if (card){
-    card.classList.remove('fall-away');
+    card.classList.remove('slide-in');
     void card.offsetWidth;
+    card.classList.add('slide-in');
   }
 
-  await sleep(1000);
-  if (card){
-    card.classList.add('fall-away');
-  }
-  await sleep(560);
+  await sleep(1400);
   globalXBackdrop.classList.add('hidden');
 }
 
@@ -2925,7 +2917,30 @@ async function resolveOneReveal(targetPlayerId, cardIndex, removedValue){
   await advanceTurnToNextPlayer();
 }
 
-async function resolveXReveal(targetPlayerId, cardIndex, removedValue){
+async function moveAllCardsToPlayer(fromPlayerId, toPlayerId){
+  if (!state.roomCode || !fromPlayerId || !toPlayerId) return [];
+  if (fromPlayerId === toPlayerId) return [];
+
+  const fromRef = ref(db, `rooms/${state.roomCode}/hands/${fromPlayerId}/cards`);
+  let moved = [];
+  const res = await runTransaction(fromRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    moved = arr.map(v => String(v));
+    return [];
+  }, { applyLocally:false });
+
+  if (!res.committed || !moved.length) return [];
+
+  const toRef = ref(db, `rooms/${state.roomCode}/hands/${toPlayerId}/cards`);
+  await runTransaction(toRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    return arr.concat(moved);
+  }, { applyLocally:false });
+
+  return moved;
+}
+
+async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealingPlayerId){
   if (!state.roomCode || !targetPlayerId) return;
 
   hidePeekCard();
@@ -2942,8 +2957,12 @@ async function resolveXReveal(targetPlayerId, cardIndex, removedValue){
     await addCardToPlayed(targetPlayerId, value);
   }
 
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
-  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
+  if (revealingPlayerId){
+    await moveAllCardsToPlayer(revealingPlayerId, targetPlayerId);
+    await set(ref(db, `rooms/${state.roomCode}/eliminated/${revealingPlayerId}`), true);
+    state.eliminated = { ...(state.eliminated || {}), [revealingPlayerId]: true };
+  }
+
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
   await advanceTurnToNextPlayer();
 }
@@ -3105,7 +3124,7 @@ async function handleEffect3Pick(targetPlayerId, cardIndex){
   }
 
   if (revealed === 'x' || revealed === '✕'){
-    await resolveXReveal(targetPlayerId, idx);
+    await resolveXReveal(targetPlayerId, idx, null, state.userId);
     return;
   }
 
@@ -3494,7 +3513,7 @@ async function handleEffect8Pick(targetPlayerId, cardIndex){
     return;
   }
   if (normalized === 'x' || normalized === '✕'){
-    await resolveXReveal(targetPlayerId, idx, normalized);
+    await resolveXReveal(targetPlayerId, idx, normalized, state.userId);
     return;
   }
 
@@ -4105,15 +4124,6 @@ function buildDeckForPlayers(playerCount){
 
 function toDisplayValue(v){ return String(v); }
 
-function buildIdentityDeck(playerCount){
-  const roles = ["キラ","L","警察1","警察2"];
-  if (playerCount === 5) roles.push("信者");
-  if (playerCount === 6) roles.push("L2");
-  let policeIndex = 3;
-  while (roles.length < playerCount) roles.push(`警察${policeIndex++}`);
-  return roles.slice(0, playerCount);
-}
-
 async function dealAllCardsAndInitialDraw(){
   if (!state.roomCode) return;
 
@@ -4130,17 +4140,13 @@ async function dealAllCardsAndInitialDraw(){
   const deckRaw = buildDeckForPlayers(playerCount);
   shuffleInPlace(deckRaw);
 
-  const idDeck = buildIdentityDeck(playerCount);
-  shuffleInPlace(idDeck);
-
   const hands = {};
   for (let i=0;i<players.length;i++){
     const p = players[i];
-    const identity = idDeck[i];
     const c1 = deckRaw.shift();
     const cards = [];
     if (c1 !== undefined) cards.push(toDisplayValue(c1));
-    hands[p.id] = { identity, cards };
+    hands[p.id] = { cards };
   }
 
   const firstPlayerId = players[0].id;
