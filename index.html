@@ -138,7 +138,7 @@
     font-weight: 400;
     white-space:nowrap;
     color:#111;
-    z-index:30;
+    z-index:20;
     pointer-events:none;
   }
 
@@ -253,6 +253,7 @@
     width:96px;
     height:56px;
     pointer-events:none;
+    z-index:40;
   }
   .mini-card{
     position:absolute;
@@ -269,7 +270,7 @@
   /* ★③/④：扇カードが大小アニメ＆クリック可（使用者のみ） */
   @keyframes fanPickPulse{
     0%{ transform:translate(-50%,0) rotate(var(--rot,0deg)) scale(1); }
-    45%{ transform:translate(-50%,0) rotate(var(--rot,0deg)) scale(1.14); }
+    45%{ transform:translate(-50%,0) rotate(var(--rot,0deg)) scale(1.44); }
     100%{ transform:translate(-50%,0) rotate(var(--rot,0deg)) scale(1); }
   }
   .mini-card.pickable{
@@ -342,7 +343,7 @@
 
   @keyframes myPulse {
     0%   { transform:scale(1); }
-    50%  { transform:scale(1.04); }
+    50%  { transform:scale(1.14); }
     100% { transform:scale(1); }
   }
   .my-hand.is-playable .my-card{
@@ -350,6 +351,9 @@
     cursor:grab;
   }
   .my-hand.is-playable .my-card:active{ cursor:grabbing; }
+  .my-hand.is-playable:not(.effect2-pick):not(.effect6-pick):not(.effect7-place):not(.effect8-return) .my-card.no-play-pulse{
+    animation:none;
+  }
 
   /* ★②：手札選択（全カードが大小アニメ＆クリック可） */
   @keyframes pickPulse2 {
@@ -588,6 +592,12 @@
   .effect-arrow-layer .head{
     fill: rgba(17,17,17,.72);
   }
+  .effect-arrow-layer .eye{
+    font-size:18px;
+    fill: rgba(17,17,17,.82);
+    text-anchor:middle;
+    dominant-baseline:middle;
+  }
 
   /* ===== ③/④：見たカード拡大（使用者のみ） ===== */
   .peek-overlay{
@@ -651,7 +661,7 @@
     pointer-events:none;
   }
 
-  /* ===== 全員：✕拡大＋揺れ ===== */
+  /* ===== 全員：✕拡大 ===== */
   .global-x-backdrop{
     position:fixed; inset:0;
     background:rgba(0,0,0,.35);
@@ -660,14 +670,9 @@
     pointer-events:none;
   }
   .global-x-backdrop.hidden{ display:none; }
-  @keyframes xShake{
-    0%{ transform:scale(1) rotate(0deg); }
-    15%{ transform:scale(1.08) rotate(-4deg); }
-    30%{ transform:scale(1.10) rotate(4deg); }
-    45%{ transform:scale(1.08) rotate(-3deg); }
-    60%{ transform:scale(1.10) rotate(3deg); }
-    75%{ transform:scale(1.06) rotate(-2deg); }
-    100%{ transform:scale(1.00) rotate(0deg); }
+  @keyframes xFallAway{
+    0%{ transform:perspective(600px) rotateX(0deg) translateY(0) scale(1); opacity:1; }
+    100%{ transform:perspective(600px) rotateX(68deg) translateY(90px) scale(0.9); opacity:.35; }
   }
   .global-x-card{
     width:160px;height:240px;border-radius:16px;
@@ -675,7 +680,10 @@
     box-shadow:0 22px 56px rgba(0,0,0,.42);
     display:flex;align-items:center;justify-content:center;
     font-size:64px;font-weight:1000;
-    animation: xShake 920ms ease-in-out 1;
+    transform-origin:center bottom;
+  }
+  .global-x-card.fall-away{
+    animation: xFallAway 520ms ease-in forwards;
   }
 
   /* ===== 全員：1拡大 ===== */
@@ -1157,8 +1165,12 @@ function updateTurnUI(){
 
   playerCircle.classList.toggle('turn-paused', !!state.turn.paused);
 
-  if (state.gameOver) showGameOver(state.gameOver?.text || 'ゲーム終了');
-  else hideGameOver();
+  if (state.gameOver){
+    if (state.gameOver?.reason === 'found5') hideGameOver();
+    else showGameOver(state.gameOver?.text || 'ゲーム終了');
+  } else {
+    hideGameOver();
+  }
 }
 
 function updateHostUI(){
@@ -1267,11 +1279,15 @@ function subscribeEffect3(){
     // 使用者だけ拡大表示
     if (mine && state.effect3 && state.effect3.phase === 'confirm' && !state.gameOver){
       const v = state.effect3.revealed;
-      if (v !== undefined && v !== null) showPeekCard(v);
-
-      showConfirmPop('閉じてもいいですか', async () => {
-        await finishEffect3AndAdvance();
-      });
+      if (String(v) === '5'){
+        hidePeekCard();
+        hideConfirmPop();
+      } else {
+        if (v !== undefined && v !== null) showPeekCard(v);
+        showConfirmPop('閉じてもいいですか', async () => {
+          await finishEffect3AndAdvance();
+        });
+      }
     } else {
       // ③中じゃない / 自分じゃない → 非表示
       if (!selecting){
@@ -1961,6 +1977,7 @@ function renderMyHand(){
     card.className = 'my-card';
     card.textContent = v;
     card.dataset.index = String(i);
+    if (String(v) === '5') card.classList.add('no-play-pulse');
 
     if (ui.effect2Selecting && ui.effect2SelectedIndex === i){
       card.classList.add('selected');
@@ -2494,7 +2511,7 @@ async function animateMoveFromPlayerToMyHand(fromPlayerId, cardValue){
   flyer.remove();
 }
 
-/* ★全員：5が左→中央2秒→左（ゲーム終了演出） */
+/* ★全員：5が左→中央へ流れて拡大→右へ流れる */
 async function animateGlobalFiveSlide(){
   const card = document.createElement('div');
   card.className = 'global-slide-card';
@@ -2502,34 +2519,37 @@ async function animateGlobalFiveSlide(){
   document.body.appendChild(card);
 
   await sleep(0);
-  card.style.transition = 'left 520ms cubic-bezier(.22,.84,.44,1), transform 520ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease';
-  card.style.left = '50%';
-  card.style.transform = 'translate(-50%,-50%)';
-  await sleep(560);
-
-  await sleep(2000);
-
-  card.style.transition = 'left 520ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease';
+  card.style.opacity = '1';
   card.style.left = '-30%';
-  await sleep(560);
+  card.style.transform = 'translate(-50%,-50%) scale(0.75)';
+  card.style.transition = 'left 600ms cubic-bezier(.22,.84,.44,1), transform 600ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease';
+  card.style.left = '50%';
+  card.style.transform = 'translate(-50%,-50%) scale(1.12)';
+  await sleep(640);
 
+  card.style.transition = 'left 520ms cubic-bezier(.22,.84,.44,1), transform 520ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease';
+  card.style.left = '130%';
+  card.style.transform = 'translate(-50%,-50%) scale(0.9)';
   card.style.opacity = '0';
-  await sleep(240);
+  await sleep(560);
   card.remove();
 }
 
-/* ★全員：✕拡大＋揺れ */
+/* ★全員：✕拡大→倒れる */
 async function animateGlobalXReveal(){
   globalXBackdrop.classList.remove('hidden');
 
-  // 毎回アニメを確実に動かす
-  const old = document.getElementById('globalXCard');
-  if (old){
-    const fresh = old.cloneNode(true);
-    old.parentNode.replaceChild(fresh, old);
+  const card = document.getElementById('globalXCard');
+  if (card){
+    card.classList.remove('fall-away');
+    void card.offsetWidth;
   }
 
-  await sleep(980);
+  await sleep(1000);
+  if (card){
+    card.classList.add('fall-away');
+  }
+  await sleep(560);
   globalXBackdrop.classList.add('hidden');
 }
 
@@ -3304,6 +3324,13 @@ async function resolveEffect7(playerId){
   const seq = state.turn.turnSeq;
   const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
 
+  const ruinsSlots = getRuinsSlots();
+  const hasRuins = ruinsSlots.some((slot) => !!slot);
+  if (!hasRuins){
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
   await update(turnRef, { paused:true });
 
   const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -3747,13 +3774,11 @@ function renderRuinsArea(){
   if (mine6Selecting || mine7Placing) wrap.classList.add('drop-enabled');
 
   const slots = getRuinsSlots();
-  const nextSlot6 = firstEmptyRuinSlotIndex(slots);
 
   for (let i=0;i<6;i++){
     const slot = document.createElement('div');
     slot.className = 'ruins-slot';
     slot.dataset.i = String(i);
-    if (mine6Selecting && nextSlot6 === i) slot.classList.add('next-target');
     if (mine7Placing && Number(ui.effect7TargetSlot) === i) slot.classList.add('hint-target');
     wrap.appendChild(slot);
   }
@@ -3792,22 +3817,26 @@ function renderEffectArrowLayer(players){
 
   // ③/④のどちらかが「確定（confirm）」なら矢印候補
   let fromPid = null, toPid = null, show = false;
+  let effectType = null;
 
   if (ef3 && (ef3.phase === 'confirm') && ef3.playerId && ef3.targetPlayerId){
     // 使用者以外の画面で表示
     show = (state.userId !== ef3.playerId);
     fromPid = ef3.playerId;
     toPid = ef3.targetPlayerId;
+    effectType = '3';
   }
   if (ef4 && (ef4.phase === 'confirm') && ef4.playerId && ef4.targetPlayerId){
     show = (state.userId !== ef4.playerId);
     fromPid = ef4.playerId;
     toPid = ef4.targetPlayerId;
+    effectType = '4';
   }
   if (ef8 && (ef8.phase === 'return') && ef8.playerId && ef8.targetPlayerId){
     show = (state.userId !== ef8.playerId);
     fromPid = ef8.playerId;
     toPid = ef8.targetPlayerId;
+    effectType = '8';
   }
 
   if (!show){
@@ -3840,6 +3869,15 @@ function renderEffectArrowLayer(players){
   line.dataset.to = toPid;
   svg.appendChild(line);
 
+  const showEye = effectType === '3';
+  let eye = null;
+  if (showEye){
+    eye = document.createElementNS('http://www.w3.org/2000/svg','text');
+    eye.setAttribute('class','eye');
+    eye.textContent = '👀';
+    svg.appendChild(eye);
+  }
+
   layer.appendChild(svg);
 
   // 次フレームで座標反映
@@ -3862,6 +3900,13 @@ function renderEffectArrowLayer(players){
     line.setAttribute('y1', String(fy));
     line.setAttribute('x2', String(tx));
     line.setAttribute('y2', String(ty));
+
+    if (eye){
+      const mx = (fx + tx) / 2;
+      const my = (fy + ty) / 2;
+      eye.setAttribute('x', String(mx));
+      eye.setAttribute('y', String(my));
+    }
   });
 
   return layer;
