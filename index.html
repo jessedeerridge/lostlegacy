@@ -93,35 +93,37 @@
   .player-fan.effect8-drop-target::before{
     content:'';
     position:absolute;
-    inset:-8px;
-    border-radius:16px;
-    background:rgba(56,189,248,.18);
-    border:1px dashed rgba(56,189,248,.65);
-    box-shadow:0 12px 24px rgba(14,116,144,.18);
-    z-index:-1;
-  }
-  .player-fan.effect8-drop-target::after{
-    content:'ここにドロップ';
-    position:absolute;
     left:50%;
-    top:-22px;
-    transform:translate(-50%, -100%);
-    padding:2px 8px;
-    border-radius:999px;
-    background:rgba(14,116,144,.92);
-    color:#fff;
-    font-size:11px;
-    font-weight:700;
-    white-space:nowrap;
-    box-shadow:0 6px 16px rgba(14,116,144,.35);
+    top:50%;
+    width:36px;
+    height:36px;
+    transform:translate(-50%, -50%);
+    border-radius:50%;
+    background:rgba(37,99,235,.2);
+    box-shadow:0 10px 22px rgba(37,99,235,.35);
+    z-index:1;
   }
   .player-fan.effect8-drop-active::before{
-    background:rgba(56,189,248,.28);
-    border-color:rgba(37,99,235,.85);
-    box-shadow:0 14px 30px rgba(37,99,235,.28);
+    background:rgba(37,99,235,.35);
+    box-shadow:0 14px 30px rgba(37,99,235,.45);
   }
 
   #myHandRow{ transform: translateY(30px); }
+  #myHandRow.effect7-pick-target::before{
+    content:'';
+    position:absolute;
+    inset:-10px;
+    border-radius:16px;
+    border:2px dashed rgba(37,99,235,.55);
+    background:rgba(219,234,254,.35);
+    box-shadow:0 10px 22px rgba(37,99,235,.18);
+    pointer-events:none;
+  }
+  #myHandRow.effect7-pick-active::before{
+    border-color:#2563eb;
+    background:rgba(219,234,254,.6);
+    box-shadow:0 12px 26px rgba(37,99,235,.32);
+  }
 
   .player-fan .fan-name{
     position:absolute;
@@ -151,19 +153,32 @@
     transform:translate(-50%,-50%) translateY(var(--center-shift-y));
     width:176px; height:64px;
     border-radius:14px;
-    background:rgba(255,255,255,.88);
-    border:2px dashed rgba(17,17,17,.35);
-    box-shadow:0 10px 22px rgba(0,0,0,.15);
+    background:transparent;
+    border:none;
+    box-shadow:none;
     display:grid; place-items:center;
     font-weight:900;
     font-size:11px;
     letter-spacing:.06em;
     user-select:none;
     z-index:5;
+    color:transparent;
+  }
+  .center-area.drag-hint{
+    border:2px dashed rgba(37,99,235,.45);
+    background:rgba(219,234,254,.35);
+    box-shadow:0 10px 22px rgba(37,99,235,.18);
+    color:#1e3a8a;
+  }
+  .center-area.drag-hint::after{
+    content:'ここにドロップ';
+    font-size:11px;
+    font-weight:800;
+    color:#1e3a8a;
   }
   .center-area.active-drop{
-    border-color:#111;
-    background:rgba(255,255,255,.95);
+    border-color:#1d4ed8;
+    background:rgba(219,234,254,.55);
     transform:translate(-50%,-50%) translateY(var(--center-shift-y)) scale(1.03);
   }
 
@@ -193,6 +208,15 @@
     font-weight:900;
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 6px 14px rgba(0,0,0,.12);
+  }
+  .deck-pile.effect2-drop-target{
+    border-color:rgba(37,99,235,.8);
+    box-shadow:0 10px 22px rgba(37,99,235,.25);
+    background:linear-gradient(135deg,#dbeafe,#bfdbfe);
+  }
+  .deck-pile.effect2-drop-active{
+    box-shadow:0 14px 28px rgba(37,99,235,.35);
+    transform:translate(-50%,-50%) scale(1.06);
   }
 
   /* 共通：裏カードの飛び（他プレイヤーにも見せる） */
@@ -311,6 +335,7 @@
     justify-content:center;
     gap:8px;
     margin-top:6px;
+    position:relative;
   }
 
   .my-hand{
@@ -335,11 +360,6 @@
     outline-offset:2px;
   }
 
-  .my-identity-card{
-    font-size:14px;
-    font-weight:900;
-    letter-spacing:.02em;
-  }
 
   @keyframes myPulse {
     0%   { transform:scale(1); }
@@ -363,7 +383,7 @@
   }
   .my-hand.effect2-pick .my-card{
     animation: pickPulse2 760ms ease-in-out infinite;
-    cursor:pointer;
+    cursor:grab;
   }
   .my-hand.effect2-pick .my-card:hover{
     outline:2px solid rgba(37,99,235,.55);
@@ -555,12 +575,12 @@
 
   @keyframes ruinsPulse {
     0%   { transform:translate(-50%,-50%) scale(1); }
-    45%  { transform:translate(-50%,-50%) scale(1.10); }
+    45%  { transform:translate(-50%,-50%) scale(1.20); }
     100% { transform:translate(-50%,-50%) scale(1); }
   }
   .ruins-card.pickable{
     pointer-events:auto;
-    cursor:pointer;
+    cursor:grab;
     animation: ruinsPulse 760ms ease-in-out infinite;
     outline:2px solid rgba(37,99,235,.0);
   }
@@ -758,12 +778,11 @@
         <div id="deckCount" class="deck-count">0</div>
       </div>
 
-      <div id="centerArea" class="center-area">CENTER</div>
+      <div id="centerArea" class="center-area"></div>
     </div>
 
     <div class="my-hand-wrapper">
-      <div class="my-hand-row" id="myHandRow">
-        <div id="myIdentity" class="my-card my-identity-card hidden"></div>
+    <div class="my-hand-row" id="myHandRow">
         <div id="myHand" class="my-hand"></div>
       </div>
     </div>
@@ -814,11 +833,11 @@
     ※ドロー演出は <b>全員の画面</b> に出ます。<br>
     ★ 今回：<b>ドロー演出が終わってから</b> 手札が増えます（重複見え防止）。<br>
     ★ 追加：山札0枚で <b>全員のプレイ済みカード→山札へ戻してシャッフル</b> してからドロー。<br>
-    ★ ②：<b>追加で1枚ドロー(全員に裏で移動可視)</b> → <b>手札全て大小</b> → <b>1枚選んで青枠</b> → <b>山札の一番上へ戻す(全員に裏で移動可視)</b><br>
+    ★ ②：<b>追加で1枚ドロー(全員に裏で移動可視)</b> → <b>手札全て大小</b> → <b>1枚ドラッグ</b> → <b>山札の一番上へ戻す(全員に裏で移動可視)</b><br>
     ★ ③：<b>他プレイヤー扇カード大小</b> → <b>1枚選んで使用者だけ拡大</b> → <b>他全員は使用者→対象へ点線矢印</b> → <b>下ポップ「閉じてもいいですか」→はいで次ターン</b><br>
     ★ ④：<b>他プレイヤー扇カード大小</b> → <b>1枚選んで使用者だけ拡大</b> → <b>他全員は使用者→対象へ点線矢印</b> → <b>下ポップ→はいで次ターン</b><br>
     ★ ⑥：<b>追加で1枚ドロー</b> → <b>手札大小</b> → <b>1枚をドラッグして遺跡(2x3順番)へ配置</b><br>
-    ★ ⑦：<b>遺跡カード全て大小</b> → <b>1枚選んで手札へ</b> → <b>手札大小＆ドラッグ</b> → <b>空いた遺跡スロットへ配置</b><br>
+    ★ ⑦：<b>遺跡カード全て大小</b> → <b>1枚ドラッグで手札へ</b> → <b>手札大小＆ドラッグ</b> → <b>空いた遺跡スロットへ配置</b><br>
     ★ 追加：⑦の「遺跡→手札」「手札→遺跡」移動アニメを <b>他プレイヤーの画面</b> にも表示
   </div>
   <div class="start-pop-actions">
@@ -960,6 +979,7 @@ const deckPile = document.getElementById('deckPile');
 const deckCountEl = document.getElementById('deckCount');
 const centerArea = document.getElementById('centerArea');
 
+const myHandRow = document.getElementById('myHandRow');
 const myHandEl = document.getElementById('myHand');
 const myIdentityEl = document.getElementById('myIdentity');
 
@@ -1261,6 +1281,7 @@ function subscribeEffect2(){
     if (selecting !== ui.effect2Selecting){
       ui.effect2Selecting = selecting;
       ui.effect2SelectedIndex = null;
+      if (!selecting && e2drag.active) cleanupE2Drag();
       updateTurnUI();
       renderMyHand();
     }
@@ -1364,6 +1385,7 @@ function subscribeEffect7(){
     ui.effect7Placing = placing;
     ui.effect7TargetSlot = mine ? (state.effect7?.targetSlotIndex ?? null) : null;
     ui.effect7PickedValue = mine ? (state.effect7?.pickedValue ?? null) : null;
+    if (!picking && e7pickDrag.active) cleanupE7PickDrag();
 
     updateTurnUI();
     renderHands();
@@ -1604,11 +1626,17 @@ function renderMyIdentity(){
 /* ドラッグ状態（通常プレイ） */
 let drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overCenter:false, sourceEl:null };
 
+/* ②ドラッグ状態（山札へ戻す） */
+let e2drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overDeck:false, sourceEl:null };
+
 /* ⑥ドラッグ状態（遺跡へドロップ） */
 let e6drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overSlot:false, slotIndex:null, sourceEl:null };
 
 /* ★⑦ドラッグ状態（指定スロットへドロップ） */
 let e7drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overSlot:false, slotIndex:null, sourceEl:null };
+
+/* ★⑦ドラッグ状態（遺跡→手札） */
+let e7pickDrag = { active:false, slotIndex:null, pointerId:null, ghostEl:null, overHand:false, sourceEl:null };
 
 /* ★⑧ドラッグ状態（相手へ返す） */
 let e8drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overTarget:false, targetPlayerId:null, sourceEl:null };
@@ -1623,10 +1651,23 @@ function cleanupDrag(){
   drag.sourceEl = null;
   drag.overCenter = false;
   centerArea.classList.remove('active-drop');
+  centerArea.classList.remove('drag-hint');
 }
-function cleanupE6Drag(){
+function cleanupE2Drag({ keepSourceHidden = false } = {}){
+  if (e2drag.ghostEl) e2drag.ghostEl.remove();
+  if (e2drag.sourceEl && !keepSourceHidden) e2drag.sourceEl.classList.remove('drag-source-hidden');
+  e2drag.active = false;
+  e2drag.cardIndex = null;
+  e2drag.pointerId = null;
+  e2drag.ghostEl = null;
+  e2drag.sourceEl = null;
+  e2drag.overDeck = false;
+  setDeckDropActive(false);
+  setDeckDropHint(false);
+}
+function cleanupE6Drag({ keepSourceHidden = false } = {}){
   if (e6drag.ghostEl) e6drag.ghostEl.remove();
-  if (e6drag.sourceEl) e6drag.sourceEl.classList.remove('drag-source-hidden');
+  if (e6drag.sourceEl && !keepSourceHidden) e6drag.sourceEl.classList.remove('drag-source-hidden');
   e6drag.active = false;
   e6drag.cardIndex = null;
   e6drag.pointerId = null;
@@ -1636,9 +1677,9 @@ function cleanupE6Drag(){
   e6drag.slotIndex = null;
   clearRuinSlotHighlights();
 }
-function cleanupE7Drag(){
+function cleanupE7Drag({ keepSourceHidden = false } = {}){
   if (e7drag.ghostEl) e7drag.ghostEl.remove();
-  if (e7drag.sourceEl) e7drag.sourceEl.classList.remove('drag-source-hidden');
+  if (e7drag.sourceEl && !keepSourceHidden) e7drag.sourceEl.classList.remove('drag-source-hidden');
   e7drag.active = false;
   e7drag.cardIndex = null;
   e7drag.pointerId = null;
@@ -1647,6 +1688,18 @@ function cleanupE7Drag(){
   e7drag.overSlot = false;
   e7drag.slotIndex = null;
   clearRuinSlotHighlights();
+}
+function cleanupE7PickDrag({ keepSourceHidden = false } = {}){
+  if (e7pickDrag.ghostEl) e7pickDrag.ghostEl.remove();
+  if (e7pickDrag.sourceEl && !keepSourceHidden) e7pickDrag.sourceEl.classList.remove('drag-source-hidden');
+  e7pickDrag.active = false;
+  e7pickDrag.slotIndex = null;
+  e7pickDrag.pointerId = null;
+  e7pickDrag.ghostEl = null;
+  e7pickDrag.sourceEl = null;
+  e7pickDrag.overHand = false;
+  setHandDropActive(false);
+  setHandDropHint(false);
 }
 function getEffect8TargetEl(){
   if (!ui.effect8TargetPlayerId) return null;
@@ -1710,16 +1763,61 @@ function setRuinSlotActive(slotIndex, active){
   if (!el) return;
   el.classList.toggle('active-drop', !!active);
 }
+function setDeckDropHint(active){
+  if (!deckPile) return;
+  deckPile.classList.toggle('effect2-drop-target', !!active);
+}
+function setDeckDropActive(active){
+  if (!deckPile) return;
+  deckPile.classList.toggle('effect2-drop-active', !!active);
+}
+function setHandDropHint(active){
+  if (!myHandRow) return;
+  myHandRow.classList.toggle('effect7-pick-target', !!active);
+}
+function setHandDropActive(active){
+  if (!myHandRow) return;
+  myHandRow.classList.toggle('effect7-pick-active', !!active);
+}
 
 /* ====== 手札カード pointer handlers ====== */
 function onCardPointerDown(e){
   const cardEl = e.currentTarget;
 
-  // ★ゲーム終了/脱落/③④②選択中はドラッグ禁止
+  // ★ゲーム終了/脱落/③④選択中はドラッグ禁止
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
-  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting) return;
+  if (ui.effect3Selecting || ui.effect4Selecting) return;
   if (ui.effect8Selecting) return;
+
+  if (ui.effect2Selecting){
+    const idx = Number(cardEl.dataset.index);
+    if (!Number.isFinite(idx)) return;
+
+    e2drag.active = true;
+    e2drag.cardIndex = idx;
+    e2drag.pointerId = e.pointerId;
+    e2drag.overDeck = false;
+
+    e2drag.sourceEl = cardEl;
+    cardEl.classList.add('drag-source-hidden');
+
+    const ghost = document.createElement('div');
+    ghost.className = 'drag-ghost';
+    ghost.textContent = cardEl.textContent || '';
+    document.body.appendChild(ghost);
+    e2drag.ghostEl = ghost;
+
+    ghost.style.left = `${e.clientX}px`;
+    ghost.style.top  = `${e.clientY}px`;
+
+    setDeckDropHint(true);
+    setDeckDropActive(false);
+
+    cardEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
 
   if (ui.effect7Placing){
     const idx = Number(cardEl.dataset.index);
@@ -1845,7 +1943,8 @@ function onCardPointerDown(e){
   ghost.style.left = `${e.clientX}px`;
   ghost.style.top  = `${e.clientY}px`;
 
-  centerArea.classList.add('active-drop');
+  centerArea.classList.add('drag-hint');
+  centerArea.classList.remove('active-drop');
   drag.overCenter = false;
 
   cardEl.setPointerCapture(e.pointerId);
@@ -1853,6 +1952,17 @@ function onCardPointerDown(e){
 }
 
 function onCardPointerMove(e){
+  if (e2drag.active && e2drag.pointerId === e.pointerId && e2drag.ghostEl){
+    e2drag.ghostEl.style.left = `${e.clientX}px`;
+    e2drag.ghostEl.style.top  = `${e.clientY}px`;
+
+    const rect = deckPile.getBoundingClientRect();
+    const over = isPointInRect(e.clientX, e.clientY, rect);
+    e2drag.overDeck = over;
+    setDeckDropActive(over);
+    return;
+  }
+
   if (e8drag.active && e8drag.pointerId === e.pointerId && e8drag.ghostEl){
     e8drag.ghostEl.style.left = `${e.clientX}px`;
     e8drag.ghostEl.style.top  = `${e.clientY}px`;
@@ -1911,6 +2021,15 @@ function onCardPointerMove(e){
 async function onCardPointerUp(e){
   const cardEl = e.currentTarget;
 
+  if (e2drag.active && e2drag.pointerId === e.pointerId){
+    const idx = e2drag.cardIndex;
+    const shouldDrop = e2drag.overDeck;
+    cleanupE2Drag({ keepSourceHidden: shouldDrop });
+    try { cardEl.releasePointerCapture(e.pointerId); } catch {}
+    if (shouldDrop) await handleEffect2Pick(idx, cardEl);
+    return;
+  }
+
   if (e8drag.active && e8drag.pointerId === e.pointerId){
     const idx = e8drag.cardIndex;
     const shouldDrop = e8drag.overTarget;
@@ -1923,7 +2042,7 @@ async function onCardPointerUp(e){
   if (e7drag.active && e7drag.pointerId === e.pointerId){
     const idx = e7drag.cardIndex;
     const shouldDrop = e7drag.overSlot;
-    cleanupE7Drag();
+    cleanupE7Drag({ keepSourceHidden: shouldDrop });
     try { cardEl.releasePointerCapture(e.pointerId); } catch {}
     if (shouldDrop) await handleEffect7Drop(idx);
     return;
@@ -1932,7 +2051,7 @@ async function onCardPointerUp(e){
   if (e6drag.active && e6drag.pointerId === e.pointerId){
     const idx = e6drag.cardIndex;
     const shouldDrop = e6drag.overSlot;
-    cleanupE6Drag();
+    cleanupE6Drag({ keepSourceHidden: shouldDrop });
     try { cardEl.releasePointerCapture(e.pointerId); } catch {}
     if (shouldDrop) await handleEffect6Drop(idx);
     return;
@@ -1946,6 +2065,65 @@ async function onCardPointerUp(e){
 
   if (shouldPlay) await playCardFromHand(idx);
   try { cardEl.releasePointerCapture(e.pointerId); } catch {}
+}
+
+function onRuinPointerDown(e){
+  const cardEl = e.currentTarget;
+
+  if (state.gameOver) return;
+  if (state.eliminated?.[state.userId]) return;
+  if (!ui.effect7Picking) return;
+  if (!state.effect7 || state.effect7.playerId !== state.userId || state.effect7.phase !== 'pickRuins') return;
+
+  const slotIndex = Number(cardEl.dataset.i);
+  if (!Number.isFinite(slotIndex)) return;
+
+  e7pickDrag.active = true;
+  e7pickDrag.slotIndex = slotIndex;
+  e7pickDrag.pointerId = e.pointerId;
+  e7pickDrag.overHand = false;
+
+  e7pickDrag.sourceEl = cardEl;
+  cardEl.classList.add('drag-source-hidden');
+
+  const ghost = document.createElement('div');
+  ghost.className = 'drag-ghost';
+  ghost.textContent = cardEl.textContent || '';
+  document.body.appendChild(ghost);
+  e7pickDrag.ghostEl = ghost;
+
+  ghost.style.left = `${e.clientX}px`;
+  ghost.style.top  = `${e.clientY}px`;
+
+  setHandDropHint(true);
+  setHandDropActive(false);
+
+  cardEl.setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
+function onRuinPointerMove(e){
+  if (!e7pickDrag.active || e7pickDrag.pointerId !== e.pointerId || !e7pickDrag.ghostEl) return;
+
+  e7pickDrag.ghostEl.style.left = `${e.clientX}px`;
+  e7pickDrag.ghostEl.style.top  = `${e.clientY}px`;
+
+  const rect = myHandRow.getBoundingClientRect();
+  const over = isPointInRect(e.clientX, e.clientY, rect);
+  e7pickDrag.overHand = over;
+  setHandDropActive(over);
+}
+
+async function onRuinPointerUp(e){
+  const cardEl = e.currentTarget;
+
+  if (!e7pickDrag.active || e7pickDrag.pointerId !== e.pointerId) return;
+
+  const slotIndex = e7pickDrag.slotIndex;
+  const shouldDrop = e7pickDrag.overHand;
+  cleanupE7PickDrag({ keepSourceHidden: shouldDrop });
+  try { cardEl.releasePointerCapture(e.pointerId); } catch {}
+  if (shouldDrop) await handleEffect7Pick(slotIndex);
 }
 
 function renderMyHand(){
@@ -1984,13 +2162,6 @@ function renderMyHand(){
     if (shouldMarkNewLast && i === cards.length - 1){
       card.classList.add('new-in');
       setTimeout(() => card.classList.remove('new-in'), 350);
-    }
-
-    // ★②：クリックで選ぶ（ドラッグ不要）
-    if (ui.effect2Selecting){
-      card.addEventListener('click', async () => {
-        await handleEffect2Pick(i, card);
-      }, { once:true });
     }
 
     card.addEventListener('pointerdown', onCardPointerDown);
@@ -3813,10 +3984,10 @@ function renderRuinsArea(){
 
     if (mine7Picking){
       card.classList.add('pickable');
-      card.addEventListener('click', async () => {
-        card.classList.remove('pickable');
-        await handleEffect7Pick(i);
-      }, { once:true });
+      card.addEventListener('pointerdown', onRuinPointerDown);
+      card.addEventListener('pointermove', onRuinPointerMove);
+      card.addEventListener('pointerup', onRuinPointerUp);
+      card.addEventListener('pointercancel', onRuinPointerUp);
     }
 
     wrap.appendChild(card);
@@ -3888,7 +4059,7 @@ function renderEffectArrowLayer(players){
   line.dataset.to = toPid;
   svg.appendChild(line);
 
-  const showEye = effectType === '3';
+  const showEye = effectType === '3' || effectType === '4';
   let eye = null;
   if (showEye){
     eye = document.createElementNS('http://www.w3.org/2000/svg','text');
