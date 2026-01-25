@@ -85,6 +85,19 @@
     justify-content:center;
     pointer-events:none;
   }
+  .otherplayercircle{
+    position:absolute;
+    left:50%;
+    top:28px;
+    width:96px;
+    height:96px;
+    border:1px solid rgba(17,17,17,.35);
+    border-radius:50%;
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+    box-sizing:border-box;
+    z-index:5;
+  }
   /* ★ ③/④選択中はクリックできるようにする */
   .player-fan.pick-mode{ pointer-events:auto; }
 
@@ -147,6 +160,19 @@
     box-shadow:0 6px 16px rgba(0,0,0,.18);
     z-index:7;
     user-select:none;
+  }
+  .deck-circle{
+    position:absolute;
+    left:50%;
+    top:50%;
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    border:1px solid rgba(17,17,17,.35);
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+    box-sizing:border-box;
+    z-index:0;
   }
   .deck-count{
     position:absolute;
@@ -684,6 +710,7 @@
 
     <div id="playerCircle" class="player-circle">
       <div id="deckPile" class="deck-pile" title="山札">
+        <div class="deck-circle" aria-hidden="true"></div>
         <div id="deckCount" class="deck-count">0</div>
       </div>
 
@@ -3363,6 +3390,10 @@ function renderPlayerCircle(players){
       if (pickMode && !isElim){
         fan.classList.add('pick-mode');
       }
+
+      const otherCircle = document.createElement('div');
+      otherCircle.className = 'otherplayercircle';
+      fan.appendChild(otherCircle);
 
       const handData = state.hands[p.id];
       const miniHand = document.createElement('div');
