@@ -678,6 +678,30 @@
     animation: xShake 920ms ease-in-out 1;
   }
 
+  /* ===== 全員：1拡大 ===== */
+  .global-one-backdrop{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,.35);
+    display:flex; align-items:center; justify-content:center;
+    z-index:974;
+    pointer-events:none;
+  }
+  .global-one-backdrop.hidden{ display:none; }
+  @keyframes onePulse{
+    0%{ transform:scale(.6); opacity:.2; }
+    45%{ transform:scale(1.08); opacity:1; }
+    70%{ transform:scale(.96); opacity:1; }
+    100%{ transform:scale(1); opacity:.95; }
+  }
+  .global-one-card{
+    width:160px;height:240px;border-radius:16px;
+    background:#fff;border:2px solid rgba(255,255,255,.8);
+    box-shadow:0 22px 56px rgba(0,0,0,.42);
+    display:flex;align-items:center;justify-content:center;
+    font-size:64px;font-weight:1000;
+    animation: onePulse 900ms ease-in-out 1;
+  }
+
   /* ゲーム終了表示 */
   .gameover-pop{
     position:fixed; inset:0;
@@ -809,6 +833,11 @@
 <!-- ★全員：✕拡大＋揺れ -->
 <div id="globalXBackdrop" class="global-x-backdrop hidden">
   <div class="global-x-card" id="globalXCard">✕</div>
+</div>
+
+<!-- ★全員：1拡大 -->
+<div id="globalOneBackdrop" class="global-one-backdrop hidden">
+  <div class="global-one-card" id="globalOneCard">1</div>
 </div>
 
 <!-- ★全員：ゲーム終了 -->
@@ -949,20 +978,21 @@ const confirmMsg = document.getElementById('confirmMsg');
 const btnConfirmYes = document.getElementById('btnConfirmYes');
 
 const globalXBackdrop = document.getElementById('globalXBackdrop');
+const globalOneBackdrop = document.getElementById('globalOneBackdrop');
 
 const gameOverPop = document.getElementById('gameOverPop');
 const gameOverTxt = document.getElementById('gameOverTxt');
 
 const ROLE_HELP = [
-  { name: "（1）", text: "（効果説明をここに）" },
+  { name: "（1）", text: "プレイしても何も起きない。③/④/⑧で見られた場合、③/④/⑧効果を消して、全員に1を拡大表示→この1を空いている遺跡へ順番に自動配置→所有者は脱落（以後手番スキップ＆ドローなし）。" },
   { name: "（2）", text: "追加で1枚ドロー（全員に裏で移動可視）→ 手札全て大小 → 1枚選んで青枠 → 山札の一番上へ戻す（全員に裏で移動可視）" },
   { name: "（3）", text: "他プレイヤーの扇カードが大小アニメ。1枚選ぶと、使用者以外の画面では使用者→対象へ点線矢印。使用者だけ選んだカードを拡大表示。下に水色ポップ「閉じてもいいですか」→はいで次のターン。※見たカードが5なら全員で5演出→ゲーム終了（全員停止）。" },
-  { name: "（4）", text: "他プレイヤーの扇カードが大小アニメ。1枚選ぶと、使用者以外の画面では使用者→対象へ点線矢印。使用者だけ拡大表示。下にポップ→はいで次ターン。※見たカードが✕なら全員で✕拡大＆揺れ→対象は✕を捨て札へ、対象は脱落（以後手番スキップ＆ドローなし）。" },
+  { name: "（4）", text: "他プレイヤーの扇カードが大小アニメ。1枚選ぶと、使用者以外の画面では使用者→対象へ点線矢印。使用者だけ拡大表示。下にポップ→はいで次ターン。" },
   { name: "（5）", text: "（効果説明をここに）" },
   { name: "（6）", text: "追加で1枚ドロー → 手札大小 → 1枚をドラッグして遺跡(2x3順番)へ配置" },
   { name: "（7）", text: "遺跡カード全て大小 → 1枚選んで手札へ → 手札大小＆ドラッグ → 空いた遺跡スロットへ配置" },
   { name: "（8）", text: "他プレイヤーの扇カードが大小アニメ → 1枚選ぶと点線矢印表示 → そのカードが自分の手札へ移動 → 自分の手札が大小＆ドラッグ可 → さっき選んだ相手にドラッグで渡す（他プレイヤーには裏向き移動表示）" },
-  { name: "（x）", text: "効果なし（空振り）" },
+  { name: "（x）", text: "プレイしても何も起きない。③/⑧で見られた場合、③/⑧効果を消して、全員に✕を拡大表示→この✕を所有者の捨て札へ→所有者は脱落（以後手番スキップ＆ドローなし）。" },
 ];
 
 function renderHelpList(){
@@ -1043,6 +1073,7 @@ let lastReturnTopEventId = null;
 /* ★③⑤演出イベント、④✕演出イベント */
 let lastFiveSlideEventId = null;
 let lastXRevealEventId = null;
+let lastOneRevealEventId = null;
 
 function generateRoomCode(length = 6){
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -1270,12 +1301,6 @@ function subscribeEffect4(){
       const v = state.effect4.revealed;
       if (v !== undefined && v !== null) showPeekCard(v);
 
-      showConfirmPop('閉じてもいいですか', async () => {
-        await finishEffect4AndAdvance();
-      });
-    } else if (mine && state.effect4 && state.effect4.phase === 'confirmAfterX' && !state.gameOver){
-      // ✕特別処理後：使用者だけポップで次ターンへ
-      hidePeekCard();
       showConfirmPop('閉じてもいいですか', async () => {
         await finishEffect4AndAdvance();
       });
@@ -1534,6 +1559,22 @@ function subscribeXRevealEvent(){
     if (ev.at && (now - ev.at) > 20000) return;
 
     await animateGlobalXReveal();
+  });
+}
+
+/* ★1：拡大演出イベント */
+function subscribeOneRevealEvent(){
+  const evRef = ref(db, `rooms/${state.roomCode}/oneRevealEvent`);
+  onValue(evRef, async snap => {
+    const ev = snap.val();
+    if (!ev || !ev.id) return;
+    if (ev.id === lastOneRevealEventId) return;
+    lastOneRevealEventId = ev.id;
+
+    const now = Date.now();
+    if (ev.at && (now - ev.at) > 20000) return;
+
+    await animateGlobalOneReveal();
   });
 }
 
@@ -2078,6 +2119,11 @@ async function emitXRevealEvent(){
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), { id, at: Date.now() });
 }
+async function emitOneRevealEvent(){
+  if (!state.roomCode) return;
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/oneRevealEvent`), { id, at: Date.now() });
+}
 
 function shuffleInPlace(arr){
   for(let i=arr.length-1;i>0;i--){
@@ -2487,6 +2533,20 @@ async function animateGlobalXReveal(){
   globalXBackdrop.classList.add('hidden');
 }
 
+/* ★全員：1拡大 */
+async function animateGlobalOneReveal(){
+  globalOneBackdrop.classList.remove('hidden');
+
+  const old = document.getElementById('globalOneCard');
+  if (old){
+    const fresh = old.cloneNode(true);
+    old.parentNode.replaceChild(fresh, old);
+  }
+
+  await sleep(980);
+  globalOneBackdrop.classList.add('hidden');
+}
+
 /* ★遺跡：スロット中心座標（playerCircle中心基準＝遺跡は固定） */
 function getRuinSlotCenterByIndex(slotIndex){
   const idx = Math.max(0, Math.min(5, Number(slotIndex||0)));
@@ -2753,6 +2813,121 @@ async function resolveCardEffectPlaceholder(usedCard){
   console.log('EFFECT (placeholder):', usedCard);
 }
 
+async function removeCardFromHandByIndex(playerId, cardIndex){
+  if (!state.roomCode) return null;
+  const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`);
+  let removedValue = null;
+  const res = await runTransaction(cardsRef, (cs) => {
+    const arr = Array.isArray(cs) ? [...cs] : [];
+    const idx = Math.max(0, Math.min(arr.length - 1, Number(cardIndex)));
+    if (!arr.length || idx < 0 || idx >= arr.length) return arr;
+    removedValue = arr.splice(idx, 1)[0];
+    return arr;
+  }, { applyLocally:false });
+
+  if (!res.committed) return null;
+  return removedValue;
+}
+
+async function addCardToPlayed(playerId, cardValue){
+  if (!state.roomCode) return;
+  const pRef = ref(db, `rooms/${state.roomCode}/played/${playerId}`);
+  await runTransaction(pRef, (arr) => {
+    const a = Array.isArray(arr) ? [...arr] : [];
+    a.push(String(cardValue ?? ''));
+    return a;
+  }, { applyLocally:false });
+}
+
+async function placeCardIntoRuins(playerId, cardValue){
+  if (!state.roomCode) return null;
+  const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+  let slotIndex = null;
+  const res = await runTransaction(ruinsRef, (ruins) => {
+    const slots = Array.isArray(ruins) ? [...ruins] : [];
+    for (let i=0;i<6;i++){
+      if (slots[i] === undefined) slots[i] = null;
+    }
+    for (let i=0;i<6;i++){
+      if (!slots[i]){
+        slotIndex = i;
+        slots[i] = { v: String(cardValue ?? ''), by: playerId, at: Date.now() };
+        break;
+      }
+    }
+    return slots;
+  }, { applyLocally:false });
+
+  if (res.committed && slotIndex !== null){
+    await emitRuinMoveEvent(playerId, cardValue, slotIndex);
+  }
+
+  return slotIndex;
+}
+
+async function clearEffectsForOneReveal(){
+  if (!state.roomCode) return;
+  await Promise.all([
+    set(ref(db, `rooms/${state.roomCode}/effect3`), null),
+    set(ref(db, `rooms/${state.roomCode}/effect4`), null),
+    set(ref(db, `rooms/${state.roomCode}/effect8`), null),
+  ]);
+}
+
+async function clearEffectsForXReveal(){
+  if (!state.roomCode) return;
+  await Promise.all([
+    set(ref(db, `rooms/${state.roomCode}/effect3`), null),
+    set(ref(db, `rooms/${state.roomCode}/effect8`), null),
+  ]);
+}
+
+async function resolveOneReveal(targetPlayerId, cardIndex, removedValue){
+  if (!state.roomCode || !targetPlayerId) return;
+
+  hidePeekCard();
+  hideConfirmPop();
+
+  await clearEffectsForOneReveal();
+  await emitOneRevealEvent();
+
+  let value = removedValue;
+  if (value == null){
+    value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
+  }
+  if (value != null){
+    await placeCardIntoRuins(targetPlayerId, value);
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
+  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
+}
+
+async function resolveXReveal(targetPlayerId, cardIndex, removedValue){
+  if (!state.roomCode || !targetPlayerId) return;
+
+  hidePeekCard();
+  hideConfirmPop();
+
+  await clearEffectsForXReveal();
+  await emitXRevealEvent();
+
+  let value = removedValue;
+  if (value == null){
+    value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
+  }
+  if (value != null){
+    await addCardToPlayed(targetPlayerId, value);
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
+  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
+}
+
 /* =========================
    ★②：追加ドロー（全員に裏で可視）
       → 手札全て大小
@@ -2904,6 +3079,16 @@ async function handleEffect3Pick(targetPlayerId, cardIndex){
   const idx = Math.max(0, Math.min(cards.length - 1, Number(cardIndex||0)));
   const revealed = String(cards[idx] ?? '');
 
+  if (revealed === '1'){
+    await resolveOneReveal(targetPlayerId, idx);
+    return;
+  }
+
+  if (revealed === 'x' || revealed === '✕'){
+    await resolveXReveal(targetPlayerId, idx);
+    return;
+  }
+
   // まずDBへ確定（矢印のため target を残す）
   await set(ref(db, `rooms/${state.roomCode}/effect3`), {
     id: ef.id,
@@ -2959,7 +3144,6 @@ async function finishEffect3AndAdvance(){
    ★④：他プレイヤー扇カード大小 → 1枚選んで使用者だけ拡大
        他は使用者→対象へ点線矢印
        下ポップ→はいで次ターン
-       ※見たカードが✕なら：全員✕拡大揺れ、対象は✕を捨て札、対象脱落（以後手番スキップ＆ドローなし）
    ========================= */
 async function resolveEffect4(playerId){
   if (!state.roomCode) return;
@@ -2994,6 +3178,11 @@ async function handleEffect4Pick(targetPlayerId, cardIndex){
   const idx = Math.max(0, Math.min(cards.length - 1, Number(cardIndex||0)));
   const revealed = String(cards[idx] ?? '');
 
+  if (revealed === '1'){
+    await resolveOneReveal(targetPlayerId, idx);
+    return;
+  }
+
   // DBへ確定
   await set(ref(db, `rooms/${state.roomCode}/effect4`), {
     id: ef.id,
@@ -3005,51 +3194,6 @@ async function handleEffect4Pick(targetPlayerId, cardIndex){
     targetCardIndex: idx,
     revealed
   });
-
-  if (revealed === 'x' || revealed === '✕'){
-    // ★通常拡大表示はせず、全員演出へ（使用者も拡大は消す）
-    hidePeekCard();
-    hideConfirmPop();
-
-    await emitXRevealEvent();
-
-    // 対象の手札から✕を捨て札（played）へ移動し、脱落フラグ
-    const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${targetPlayerId}/cards`);
-    let removedValue = null;
-
-    const rem = await runTransaction(cardsRef, (cs) => {
-      const arr = Array.isArray(cs) ? [...cs] : [];
-      const i = Math.max(0, Math.min(arr.length - 1, Number(idx)));
-      if (!arr.length) return arr;
-      removedValue = arr.splice(i, 1)[0];
-      return arr;
-    }, { applyLocally:false });
-
-    if (rem.committed && removedValue != null){
-      // 捨て札（= played[target]）へ
-      const pRef = ref(db, `rooms/${state.roomCode}/played/${targetPlayerId}`);
-      await runTransaction(pRef, (arr) => {
-        const a = Array.isArray(arr) ? [...arr] : [];
-        a.push(String(removedValue));
-        return a;
-      }, { applyLocally:false });
-    }
-
-    // 脱落
-    await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
-
-    // effect4は「確認（次へ）」だけ残す
-    await set(ref(db, `rooms/${state.roomCode}/effect4`), {
-      id: ef.id,
-      playerId: ef.playerId,
-      seq: Number(ef.seq || 0),
-      phase: 'confirmAfterX',
-      at: Date.now(),
-      targetPlayerId,
-      targetCardIndex: idx,
-      revealed: 'x'
-    });
-  }
 }
 
 async function finishEffect4AndAdvance(){
@@ -3317,6 +3461,16 @@ async function handleEffect8Pick(targetPlayerId, cardIndex){
 
   if (!rem.committed || removedValue == null) return;
 
+  const normalized = String(removedValue);
+  if (normalized === '1'){
+    await resolveOneReveal(targetPlayerId, idx, normalized);
+    return;
+  }
+  if (normalized === 'x' || normalized === '✕'){
+    await resolveXReveal(targetPlayerId, idx, normalized);
+    return;
+  }
+
   await emitHandTransferEvent(targetPlayerId, state.userId, state.userId);
   await animateMoveFromPlayerToMyHand(targetPlayerId, removedValue);
   await addCardToHandAtomic(state.userId, String(removedValue));
@@ -3465,6 +3619,7 @@ btnJoin.addEventListener('click', async () => {
 
   subscribeFiveSlideEvent();
   subscribeXRevealEvent();
+  subscribeOneRevealEvent();
 
   syncSeatUI();
 });
@@ -3635,7 +3790,7 @@ function renderEffectArrowLayer(players){
   const ef4 = state.effect4;
   const ef8 = state.effect8;
 
-  // ③/④のどちらかが「確定（confirm/confirmAfterX）」なら矢印候補
+  // ③/④のどちらかが「確定（confirm）」なら矢印候補
   let fromPid = null, toPid = null, show = false;
 
   if (ef3 && (ef3.phase === 'confirm') && ef3.playerId && ef3.targetPlayerId){
@@ -3644,7 +3799,7 @@ function renderEffectArrowLayer(players){
     fromPid = ef3.playerId;
     toPid = ef3.targetPlayerId;
   }
-  if (ef4 && (ef4.phase === 'confirm' || ef4.phase === 'confirmAfterX') && ef4.playerId && ef4.targetPlayerId){
+  if (ef4 && (ef4.phase === 'confirm') && ef4.playerId && ef4.targetPlayerId){
     show = (state.userId !== ef4.playerId);
     fromPid = ef4.playerId;
     toPid = ef4.targetPlayerId;
@@ -3973,6 +4128,7 @@ async function dealAllCardsAndInitialDraw(){
 
     set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), null),
+    set(ref(db, `rooms/${state.roomCode}/oneRevealEvent`), null),
   ]);
 
   if (initialDrawDisp){
@@ -4021,6 +4177,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/ruinTakeEvent`)),
     remove(ref(db, `${base}/fiveSlideEvent`)),
     remove(ref(db, `${base}/xRevealEvent`)),
+    remove(ref(db, `${base}/oneRevealEvent`)),
     remove(ref(db, `${base}/handTransferEvent`)),
   ]);
   state.seatedTable = null;
