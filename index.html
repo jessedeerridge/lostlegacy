@@ -712,12 +712,6 @@
     pointer-events:none;
   }
   .global-x-backdrop.hidden{ display:none; }
-  @keyframes xSlideUp{
-    0%{ transform:translateY(38vh) scale(0.95) rotate(0deg); opacity:0; }
-    55%{ transform:translateY(0) scale(1.05) rotate(0deg); opacity:1; }
-    78%{ transform:translateY(0) scale(1.02) rotate(0deg); opacity:1; }
-    100%{ transform:translateY(16vh) scale(0.96) rotate(92deg); opacity:0; }
-  }
   .global-x-card{
     width:160px;height:240px;border-radius:16px;
     background:#fff;border:2px solid rgba(255,255,255,.78);
@@ -725,9 +719,25 @@
     display:flex;align-items:center;justify-content:center;
     font-size:64px;font-weight:1000;
     opacity:0;
+    transform:translateY(38vh) scale(0.95);
+    transform-origin:center bottom;
   }
-  .global-x-card.slide-in{
-    animation: xSlideUp 1200ms cubic-bezier(.22,.84,.44,1) forwards;
+  @keyframes xShake{
+    0%{ transform:translateY(0) scale(1.05) rotate(0deg); }
+    25%{ transform:translateY(0) scale(1.05) rotate(2deg); }
+    50%{ transform:translateY(0) scale(1.05) rotate(-2deg); }
+    75%{ transform:translateY(0) scale(1.05) rotate(1.5deg); }
+    100%{ transform:translateY(0) scale(1.05) rotate(0deg); }
+  }
+  .global-x-card.x-shake{
+    animation: xShake 140ms ease-in-out infinite;
+  }
+  @keyframes xFallBack{
+    0%{ transform:translateY(0) scale(1.05) rotateX(0deg); opacity:1; }
+    100%{ transform:translateY(36px) scale(0.92) rotateX(72deg); opacity:0; }
+  }
+  .global-x-card.x-fall-back{
+    animation: xFallBack 820ms ease-in forwards;
   }
 
   /* ===== 全員：1拡大 ===== */
@@ -751,7 +761,25 @@
     box-shadow:0 22px 56px rgba(0,0,0,.42);
     display:flex;align-items:center;justify-content:center;
     font-size:64px;font-weight:1000;
-    animation: onePulse 900ms ease-in-out 1;
+    animation: onePulse 1500ms ease-in-out 1;
+  }
+
+  .player-fan.one-reveal{
+    transform:translate(-50%,-50%) scale(1.5);
+    z-index:70;
+  }
+  .my-hand-row.one-reveal{
+    transform:translateY(30px) scale(1.5);
+    z-index:70;
+  }
+  .mini-card.one-reveal-front{
+    background:#fff;
+    color:#111;
+    font-weight:900;
+    font-size:12px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
   }
 
   /* ゲーム終了表示 */
@@ -1288,6 +1316,30 @@ function setPlayerHandReveal(playerId, active, { flip = false } = {}){
       card.textContent = String(cards[idx] ?? '');
     } else {
       card.classList.remove('exploration-front');
+      card.textContent = '';
+    }
+  });
+}
+
+function setOneRevealHand(playerId, active){
+  if (!playerId) return;
+  if (playerId === state.userId){
+    myHandRow.classList.toggle('one-reveal', active);
+    return;
+  }
+
+  const fan = playerCircle.querySelector(`.player-fan[data-pid="${playerId}"]`);
+  if (!fan) return;
+  fan.classList.toggle('one-reveal', active);
+
+  const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
+  const miniCards = fan.querySelectorAll('.mini-card');
+  miniCards.forEach((card, idx) => {
+    if (active){
+      card.classList.add('one-reveal-front');
+      card.textContent = String(cards[idx] ?? '');
+    } else {
+      card.classList.remove('one-reveal-front');
       card.textContent = '';
     }
   });
@@ -1973,7 +2025,7 @@ function subscribeXRevealEvent(){
     const now = Date.now();
     if (ev.at && (now - ev.at) > 20000) return;
 
-    await animateGlobalXReveal();
+    await animateGlobalXReveal(ev.mode || 'effect38');
   });
 }
 
@@ -1989,7 +2041,7 @@ function subscribeOneRevealEvent(){
     const now = Date.now();
     if (ev.at && (now - ev.at) > 20000) return;
 
-    await animateGlobalOneReveal();
+    await animateGlobalOneReveal(ev.targetPlayerId || null);
   });
 }
 
@@ -2694,15 +2746,15 @@ async function emitFiveSlideEvent(){
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), { id, at: Date.now() });
 }
-async function emitXRevealEvent(){
+async function emitXRevealEvent(mode){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  await set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), { id, at: Date.now() });
+  await set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), { id, mode: mode || 'effect38', at: Date.now() });
 }
-async function emitOneRevealEvent(){
+async function emitOneRevealEvent(targetPlayerId){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  await set(ref(db, `rooms/${state.roomCode}/oneRevealEvent`), { id, at: Date.now() });
+  await set(ref(db, `rooms/${state.roomCode}/oneRevealEvent`), { id, targetPlayerId: targetPlayerId || null, at: Date.now() });
 }
 
 async function emitExplorationFaceEvent(){
@@ -3111,7 +3163,7 @@ async function animateGlobalFiveSlide(){
   card.style.transition = 'transform 120ms ease';
   card.style.transform = 'translate(-50%,-50%) scale(1.08)';
   await sleep(120);
-  await sleep(1200);
+  await sleep(1500);
 
   card.style.transition = 'left 520ms cubic-bezier(.22,.84,.44,1), transform 520ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease';
   card.style.left = '130%';
@@ -3122,23 +3174,52 @@ async function animateGlobalFiveSlide(){
 }
 
 /* ★全員：✕拡大→下から中央へ */
-async function animateGlobalXReveal(){
+async function animateGlobalXReveal(mode = 'effect38'){
   globalXBackdrop.classList.remove('hidden');
 
   const card = document.getElementById('globalXCard');
-  if (card){
-    card.classList.remove('slide-in');
-    void card.offsetWidth;
-    card.classList.add('slide-in');
+  if (!card){
+    globalXBackdrop.classList.add('hidden');
+    return;
   }
 
-  await sleep(1400);
+  card.classList.remove('x-shake', 'x-fall-back');
+  card.style.transition = 'none';
+  card.style.opacity = '0';
+  card.style.transform = (mode === 'effect4') ? 'translateY(0) scale(1.05)' : 'translateY(38vh) scale(0.95)';
+  void card.offsetWidth;
+
+  if (mode === 'effect4'){
+    card.style.transition = 'opacity 180ms ease';
+    card.style.opacity = '1';
+    await sleep(220);
+    card.classList.add('x-shake');
+    await sleep(360);
+    card.classList.remove('x-shake');
+    card.classList.add('x-fall-back');
+    await sleep(1000);
+  } else {
+    card.style.transition = 'transform 420ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease';
+    card.style.opacity = '1';
+    card.style.transform = 'translateY(0) scale(1.05)';
+    await sleep(460);
+    card.classList.add('x-shake');
+    await sleep(1500);
+    card.classList.remove('x-shake');
+    card.style.transition = 'opacity 240ms ease, transform 240ms ease';
+    card.style.opacity = '0';
+    card.style.transform = 'translateY(8px) scale(0.96)';
+    await sleep(260);
+  }
+
+  card.classList.remove('x-fall-back');
   globalXBackdrop.classList.add('hidden');
 }
 
 /* ★全員：1拡大 */
-async function animateGlobalOneReveal(){
+async function animateGlobalOneReveal(targetPlayerId){
   globalOneBackdrop.classList.remove('hidden');
+  setOneRevealHand(targetPlayerId, true);
 
   const old = document.getElementById('globalOneCard');
   if (old){
@@ -3146,8 +3227,10 @@ async function animateGlobalOneReveal(){
     old.parentNode.replaceChild(fresh, old);
   }
 
-  await sleep(980);
+  await sleep(1500);
   globalOneBackdrop.classList.add('hidden');
+  await sleep(1500);
+  setOneRevealHand(targetPlayerId, false);
 }
 
 /* ★遺跡：スロット中心座標（playerCircle中心基準＝遺跡は固定） */
@@ -3181,8 +3264,7 @@ async function animateTakeFromRuinToMyHand(slotIndex, cardValue){
   }
 
   const flyer = document.createElement('div');
-  flyer.className = 'front-flyer';
-  flyer.textContent = String(cardValue ?? '');
+  flyer.className = 'back-flyer';
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(6deg) scale(0.82)';
@@ -3197,7 +3279,7 @@ async function animateTakeFromRuinToMyHand(slotIndex, cardValue){
   flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
   flyer.style.left = `${endX}px`;
   flyer.style.top  = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(-8deg) scale(1.08)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-8deg) scale(0.98)';
   await sleep(440);
 
   flyer.style.transition = 'opacity 140ms ease, transform 140ms ease';
@@ -3223,8 +3305,7 @@ async function animateTakeFromRuinToPlayerAnchor(playerId, slotIndex, cardValue)
   }
 
   const flyer = document.createElement('div');
-  flyer.className = 'front-flyer';
-  flyer.textContent = String(cardValue ?? '');
+  flyer.className = 'back-flyer';
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(6deg) scale(0.82)';
@@ -3239,7 +3320,7 @@ async function animateTakeFromRuinToPlayerAnchor(playerId, slotIndex, cardValue)
   flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
   flyer.style.left = `${endX}px`;
   flyer.style.top  = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(-8deg) scale(0.92)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-8deg) scale(0.86)';
   await sleep(440);
 
   flyer.style.transition = 'opacity 140ms ease, transform 140ms ease';
@@ -3405,6 +3486,10 @@ async function playCardFromHand(cardIndex){
     await resolveEffect8(myId);
     return;
   }
+  if (String(used) === '1'){
+    await advanceTurnToNextPlayer();
+    return;
+  }
 
   await resolveCardEffectPlaceholder(used);
   await advanceTurnToNextPlayer();
@@ -3491,7 +3576,8 @@ async function resolveOneReveal(targetPlayerId, cardIndex, removedValue){
   hideConfirmPop();
 
   await clearEffectsForOneReveal();
-  await emitOneRevealEvent();
+  await emitOneRevealEvent(targetPlayerId);
+  await sleep(3000);
 
   let value = removedValue;
   if (value == null){
@@ -3530,6 +3616,28 @@ async function moveAllCardsToPlayer(fromPlayerId, toPlayerId){
   return moved;
 }
 
+async function discardHandToPlayed(playerId){
+  if (!state.roomCode || !playerId) return [];
+
+  const handRef = ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`);
+  let removed = [];
+  const res = await runTransaction(handRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    removed = arr.map(v => String(v));
+    return [];
+  }, { applyLocally:false });
+
+  if (!res.committed || !removed.length) return [];
+
+  const playedRef = ref(db, `rooms/${state.roomCode}/played/${playerId}`);
+  await runTransaction(playedRef, (arr) => {
+    const a = Array.isArray(arr) ? [...arr] : [];
+    return a.concat(removed);
+  }, { applyLocally:false });
+
+  return removed;
+}
+
 async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealingPlayerId){
   if (!state.roomCode || !targetPlayerId) return;
 
@@ -3537,8 +3645,9 @@ async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealing
   hideConfirmPop();
 
   await clearEffectsForXReveal();
-  await emitXRevealEvent();
+  await emitXRevealEvent('effect38');
 
+  await sleep(3000);
   let value = removedValue;
   if (value == null){
     value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
@@ -3548,9 +3657,8 @@ async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealing
   }
 
   if (revealingPlayerId){
+    await sleep(1500);
     await moveAllCardsToPlayer(revealingPlayerId, targetPlayerId);
-    await set(ref(db, `rooms/${state.roomCode}/eliminated/${revealingPlayerId}`), true);
-    state.eliminated = { ...(state.eliminated || {}), [revealingPlayerId]: true };
   }
 
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
@@ -3563,15 +3671,9 @@ async function resolveEffect4XReveal(targetPlayerId, cardIndex){
   hidePeekCard();
   hideConfirmPop();
 
-  await emitXRevealEvent();
-
-  const removedValue = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
-  if (removedValue != null){
-    await addCardToPlayed(targetPlayerId, removedValue);
-  }
-
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
-  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
+  await emitXRevealEvent('effect4');
+  await sleep(2500);
+  await discardHandToPlayed(targetPlayerId);
 
   await set(ref(db, `rooms/${state.roomCode}/effect4`), null);
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
@@ -4132,6 +4234,16 @@ async function handleEffect8Pick(targetPlayerId, cardIndex){
   if (!cards.length) return;
 
   const idx = Math.max(0, Math.min(cards.length - 1, Number(cardIndex || 0)));
+  const revealed = String(cards[idx] ?? '');
+
+  if (revealed === '1'){
+    await resolveOneReveal(targetPlayerId, idx, null);
+    return;
+  }
+  if (revealed === 'x' || revealed === '✕'){
+    await resolveXReveal(targetPlayerId, idx, null, state.userId);
+    return;
+  }
 
   const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${targetPlayerId}/cards`);
   let removedValue = null;
@@ -4144,16 +4256,6 @@ async function handleEffect8Pick(targetPlayerId, cardIndex){
   }, { applyLocally:false });
 
   if (!rem.committed || removedValue == null) return;
-
-  const normalized = String(removedValue);
-  if (normalized === '1'){
-    await resolveOneReveal(targetPlayerId, idx, normalized);
-    return;
-  }
-  if (normalized === 'x' || normalized === '✕'){
-    await resolveXReveal(targetPlayerId, idx, normalized, state.userId);
-    return;
-  }
 
   await emitHandTransferEvent(targetPlayerId, state.userId, state.userId);
   await animateMoveFromPlayerToMyHand(targetPlayerId, removedValue);
