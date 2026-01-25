@@ -730,7 +730,7 @@
     100%{ transform:translateY(0) scale(1.05) rotate(0deg); }
   }
   .global-x-card.x-shake{
-    animation: xShake 140ms ease-in-out infinite;
+    animation: xShake 120ms ease-in-out 2;
   }
   @keyframes xFallBack{
     0%{ transform:translateY(0) scale(1.05) rotateX(0deg); opacity:1; }
@@ -3152,9 +3152,11 @@ async function animateGlobalFiveSlide(){
   document.body.appendChild(card);
 
   await sleep(0);
+  card.style.transition = 'none';
   card.style.opacity = '1';
   card.style.left = '-30%';
   card.style.transform = 'translate(-50%,-50%) scale(0.75)';
+  void card.offsetWidth;
   card.style.transition = 'left 600ms cubic-bezier(.22,.84,.44,1), transform 600ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease';
   card.style.left = '50%';
   card.style.transform = 'translate(-50%,-50%) scale(1.12)';
@@ -3194,7 +3196,7 @@ async function animateGlobalXReveal(mode = 'effect38'){
     card.style.opacity = '1';
     await sleep(220);
     card.classList.add('x-shake');
-    await sleep(360);
+    await sleep(260);
     card.classList.remove('x-shake');
     card.classList.add('x-fall-back');
     await sleep(1000);
@@ -3204,7 +3206,7 @@ async function animateGlobalXReveal(mode = 'effect38'){
     card.style.transform = 'translateY(0) scale(1.05)';
     await sleep(460);
     card.classList.add('x-shake');
-    await sleep(1500);
+    await sleep(300);
     card.classList.remove('x-shake');
     card.style.transition = 'opacity 240ms ease, transform 240ms ease';
     card.style.opacity = '0';
@@ -3584,6 +3586,9 @@ async function resolveOneReveal(targetPlayerId, cardIndex, removedValue){
     value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
   }
   if (value != null){
+    await sleep(220);
+  }
+  if (value != null){
     await placeCardIntoRuins(targetPlayerId, value);
   }
 
@@ -3658,6 +3663,7 @@ async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealing
 
   if (revealingPlayerId){
     await sleep(1500);
+    await emitHandTransferEvent(revealingPlayerId, targetPlayerId, null);
     await moveAllCardsToPlayer(revealingPlayerId, targetPlayerId);
   }
 
