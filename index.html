@@ -98,8 +98,8 @@
     position:absolute;
     left:50%;
     top:50%;
-    width:36px;
-    height:36px;
+    width:72px;
+    height:72px;
     transform:translate(-50%, -50%);
     border-radius:50%;
     background:var(--hint-fill);
@@ -170,13 +170,10 @@
     border:none;
     background:var(--hint-fill);
     box-shadow:none;
-    color:#1e3a8a;
+    color:transparent;
   }
   .center-area.drag-hint::after{
-    content:'ここにドロップ';
-    font-size:11px;
-    font-weight:800;
-    color:#1e3a8a;
+    content:'';
   }
   .center-area.active-drop{
     border:none;
@@ -208,8 +205,8 @@
     width:82px;
     height:82px;
     border-radius:50%;
-    background:transparent;
-    border:2px solid rgba(59,130,246,.55);
+    background:var(--hint-fill);
+    border:none;
     transform:translate(-50%,-50%) scale(.95);
     opacity:0;
     pointer-events:none;
@@ -396,6 +393,7 @@
   .my-hand.is-playable .my-card:active{ cursor:grabbing; }
   .my-hand.is-playable:not(.effect2-pick):not(.effect6-pick):not(.effect7-place):not(.effect8-return) .my-card.no-play-pulse{
     animation:none;
+    cursor:default;
   }
 
   /* ★②：手札選択（全カードが大小アニメ＆クリック可） */
@@ -774,6 +772,24 @@
   }
   .gameover-box .ttl{ font-weight:1000; font-size:16px; margin-bottom:6px; }
   .gameover-box .txt{ font-size:13px; line-height:1.55; opacity:.92; }
+
+  .exploration-pop{
+    position:fixed;
+    left:50%;
+    top:50%;
+    transform:translate(-50%, -50%);
+    background:rgba(0,0,0,.88);
+    color:#fff;
+    padding:14px 18px;
+    border-radius:14px;
+    font-size:16px;
+    font-weight:800;
+    letter-spacing:.08em;
+    z-index:995;
+    box-shadow:0 18px 40px rgba(0,0,0,.4);
+    pointer-events:none;
+  }
+  .exploration-pop.hidden{ display:none; }
 </style>
 </head>
 <body>
@@ -857,7 +873,7 @@
     ※「自分の手番」かつ「手札が2枚」の時だけ、パルス＆ドラッグ可。<br>
     ※ドロー演出は <b>全員の画面</b> に出ます。<br>
     ★ 今回：<b>ドロー演出が終わってから</b> 手札が増えます（重複見え防止）。<br>
-    ★ 追加：山札0枚で <b>全員のプレイ済みカード→山札へ戻してシャッフル</b> してからドロー。<br>
+    ★ 追加：山札0枚で <b>そのターン終了</b>＆画面中央に「探索フェイス」表示（シャッフルなし）。<br>
     ★ ②：<b>追加で1枚ドロー(全員に裏で移動可視)</b> → <b>手札全て大小</b> → <b>1枚ドラッグ</b> → <b>山札の一番上へ戻す(全員に裏で移動可視)</b><br>
     ★ ③：<b>他プレイヤー扇カード大小</b> → <b>1枚選んで使用者だけ拡大</b> → <b>他全員は使用者→対象へ点線矢印</b> → <b>下ポップ「閉じてもいいですか」→はいで次ターン</b><br>
     ★ ④：<b>他プレイヤー扇カード大小</b> → <b>1枚選んで使用者だけ拡大</b> → <b>他全員は使用者→対象へ点線矢印</b> → <b>下ポップ→はいで次ターン</b><br>
@@ -900,6 +916,8 @@
     <div class="txt" id="gameOverTxt">終了しました。</div>
   </div>
 </div>
+
+<div id="explorationPop" class="exploration-pop hidden">探索フェイス</div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
@@ -1037,6 +1055,7 @@ const globalOneBackdrop = document.getElementById('globalOneBackdrop');
 
 const gameOverPop = document.getElementById('gameOverPop');
 const gameOverTxt = document.getElementById('gameOverTxt');
+const explorationPop = document.getElementById('explorationPop');
 
 const ROLE_HELP = [
   { name: "（1）", text: "プレイしても何も起きない。③/④/⑧で見られた場合、③/④/⑧効果を消して、全員に1を拡大表示→この1を空いている遺跡へ順番に自動配置→所有者は脱落（以後手番スキップ＆ドローなし）。" },
@@ -1107,6 +1126,13 @@ function hideGameOver(){
   gameOverPop.classList.add('hidden');
 }
 
+function showExplorationFace(){
+  explorationPop.classList.remove('hidden');
+  setTimeout(() => {
+    explorationPop.classList.add('hidden');
+  }, 1000);
+}
+
 let isRenderingSeatTabs = false;
 let latestPlayers = [];
 
@@ -1129,6 +1155,7 @@ let lastReturnTopEventId = null;
 let lastFiveSlideEventId = null;
 let lastXRevealEventId = null;
 let lastOneRevealEventId = null;
+let lastExplorationEventId = null;
 
 function generateRoomCode(length = 6){
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -1417,7 +1444,7 @@ function subscribeEffect7(){
     ui.effect7Placing = placing;
     ui.effect7TargetSlot = mine ? (state.effect7?.targetSlotIndex ?? null) : null;
     ui.effect7PickedValue = mine ? (state.effect7?.pickedValue ?? null) : null;
-    if (!picking && e7pickDrag.active) cleanupE7PickDrag();
+    if (!picking && e7pickDrag.active) cleanupE7PickDrag({ keepSourceHidden: true });
 
     updateTurnUI();
     renderHands();
@@ -1649,6 +1676,21 @@ function subscribeOneRevealEvent(){
   });
 }
 
+function subscribeExplorationFaceEvent(){
+  const evRef = ref(db, `rooms/${state.roomCode}/explorationFaceEvent`);
+  onValue(evRef, snap => {
+    const ev = snap.val();
+    if (!ev || !ev.id) return;
+    if (ev.id === lastExplorationEventId) return;
+    lastExplorationEventId = ev.id;
+
+    const now = Date.now();
+    if (ev.at && (now - ev.at) > 20000) return;
+
+    showExplorationFace();
+  });
+}
+
 function renderMyIdentity(){
   if (!myIdentityEl) return;
   myIdentityEl.classList.add('hidden');
@@ -1747,9 +1789,9 @@ function setEffect8TargetActive(active){
   if (!el) return;
   el.classList.toggle('effect8-drop-active', !!active);
 }
-function cleanupE8Drag(){
+function cleanupE8Drag({ keepSourceHidden = false } = {}){
   if (e8drag.ghostEl) e8drag.ghostEl.remove();
-  if (e8drag.sourceEl) e8drag.sourceEl.classList.remove('drag-source-hidden');
+  if (e8drag.sourceEl && !keepSourceHidden) e8drag.sourceEl.classList.remove('drag-source-hidden');
   e8drag.active = false;
   e8drag.cardIndex = null;
   e8drag.pointerId = null;
@@ -1955,6 +1997,7 @@ function onCardPointerDown(e){
   }
 
   if (!state.isPlayable) return;
+  if ((cardEl.textContent || '').trim() === '5') return;
 
   const idx = Number(cardEl.dataset.index);
   if (!Number.isFinite(idx)) return;
@@ -2069,7 +2112,7 @@ async function onCardPointerUp(e){
   if (e8drag.active && e8drag.pointerId === e.pointerId){
     const idx = e8drag.cardIndex;
     const shouldDrop = e8drag.overTarget;
-    cleanupE8Drag();
+    cleanupE8Drag({ keepSourceHidden: shouldDrop });
     try { cardEl.releasePointerCapture(e.pointerId); } catch {}
     if (shouldDrop) await handleEffect8Drop(idx);
     return;
@@ -2250,14 +2293,12 @@ async function maybeAutoDrawAtTurnStart(){
 
     if (!lockRes.committed) return;
 
-    let drawn = await drawOneFromDeckAtomic();
+    const drawn = await drawOneFromDeckAtomic();
 
     if (!drawn){
-      await reshuffleFromPlayedAndPauseTurn(myId, seq);
-      drawn = await drawOneFromDeckAtomic();
+      await handleDeckExhausted(myId, seq, null);
+      return;
     }
-
-    if (!drawn) return;
 
     await emitDrawEvent(myId, seq, 'turn');
 
@@ -2345,6 +2386,12 @@ async function emitOneRevealEvent(){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/oneRevealEvent`), { id, at: Date.now() });
+}
+
+async function emitExplorationFaceEvent(){
+  if (!state.roomCode) return;
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/explorationFaceEvent`), { id, at: Date.now() });
 }
 
 function shuffleInPlace(arr){
@@ -2466,6 +2513,18 @@ async function reshuffleFromPlayedAndPauseTurn(playerId, seq){
   } finally {
     await releaseReshuffleLock();
   }
+}
+
+async function handleDeckExhausted(playerId, seq, effectKey){
+  if (!state.roomCode) return;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+  await emitExplorationFaceEvent();
+
+  if (effectKey){
+    await set(ref(db, `rooms/${state.roomCode}/${effectKey}`), null);
+  }
+
+  await update(turnRef, { paused:true, drawn:true, exhaustedAt: Date.now() });
 }
 
 /* anchor取得：自分はplayer-tag、他はplayer-fan */
@@ -3224,18 +3283,16 @@ async function resolveEffect2(playerId){
     at: Date.now()
   });
 
-  let drawn = await drawOneFromDeckAtomic();
+  const drawn = await drawOneFromDeckAtomic();
   if (!drawn){
-    await reshuffleFromPlayedAndPauseTurn(playerId, seq);
-    drawn = await drawOneFromDeckAtomic();
+    await handleDeckExhausted(playerId, seq, 'effect2');
+    return;
   }
 
-  if (drawn){
-    // 全員に裏で「山札→その人」移動アニメ
-    await emitDrawEvent(playerId, seq, 'effect2');
-    await sleep(DRAW_COMMIT_DELAY_MS);
-    await addCardToHandAtomic(playerId, drawn);
-  }
+  // 全員に裏で「山札→その人」移動アニメ
+  await emitDrawEvent(playerId, seq, 'effect2');
+  await sleep(DRAW_COMMIT_DELAY_MS);
+  await addCardToHandAtomic(playerId, drawn);
 
   // 手札全て大小＆クリック選択へ
   await set(ref(db, `rooms/${state.roomCode}/effect2`), {
@@ -3525,16 +3582,15 @@ async function resolveEffect6(playerId){
     at: Date.now()
   });
 
-  let drawn = await drawOneFromDeckAtomic();
+  const drawn = await drawOneFromDeckAtomic();
   if (!drawn){
-    await reshuffleFromPlayedAndPauseTurn(playerId, seq);
-    drawn = await drawOneFromDeckAtomic();
+    await handleDeckExhausted(playerId, seq, 'effect6');
+    return;
   }
-  if (drawn){
-    await emitDrawEvent(playerId, seq, 'effect6');
-    await sleep(DRAW_COMMIT_DELAY_MS);
-    await addCardToHandAtomic(playerId, drawn);
-  }
+
+  await emitDrawEvent(playerId, seq, 'effect6');
+  await sleep(DRAW_COMMIT_DELAY_MS);
+  await addCardToHandAtomic(playerId, drawn);
 
   await set(ref(db, `rooms/${state.roomCode}/effect6`), {
     id: effectId,
@@ -3940,6 +3996,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeFiveSlideEvent();
   subscribeXRevealEvent();
   subscribeOneRevealEvent();
+  subscribeExplorationFaceEvent();
 
   syncSeatUI();
 });
@@ -4423,7 +4480,7 @@ async function dealAllCardsAndInitialDraw(){
     hands[p.id] = { cards };
   }
 
-  const firstPlayerId = players[0].id;
+  const firstPlayerId = players[Math.floor(Math.random() * players.length)].id;
 
   const initialDraw = deckRaw.shift();
   const initialDrawDisp = (initialDraw !== undefined) ? toDisplayValue(initialDraw) : null;
@@ -4450,6 +4507,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/ruinTakeEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/returnTopEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/handTransferEvent`), null),
+    set(ref(db, `rooms/${state.roomCode}/explorationFaceEvent`), null),
 
     set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), null),
@@ -4503,6 +4561,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/fiveSlideEvent`)),
     remove(ref(db, `${base}/xRevealEvent`)),
     remove(ref(db, `${base}/oneRevealEvent`)),
+    remove(ref(db, `${base}/explorationFaceEvent`)),
     remove(ref(db, `${base}/handTransferEvent`)),
   ]);
   state.seatedTable = null;
