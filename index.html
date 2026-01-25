@@ -87,6 +87,39 @@
   }
   /* ★ ③/④選択中はクリックできるようにする */
   .player-fan.pick-mode{ pointer-events:auto; }
+  .player-fan.effect8-drop-target{
+    pointer-events:auto;
+  }
+  .player-fan.effect8-drop-target::before{
+    content:'';
+    position:absolute;
+    inset:-8px;
+    border-radius:16px;
+    background:rgba(56,189,248,.18);
+    border:1px dashed rgba(56,189,248,.65);
+    box-shadow:0 12px 24px rgba(14,116,144,.18);
+    z-index:-1;
+  }
+  .player-fan.effect8-drop-target::after{
+    content:'ここにドロップ';
+    position:absolute;
+    left:50%;
+    top:-22px;
+    transform:translate(-50%, -100%);
+    padding:2px 8px;
+    border-radius:999px;
+    background:rgba(14,116,144,.92);
+    color:#fff;
+    font-size:11px;
+    font-weight:700;
+    white-space:nowrap;
+    box-shadow:0 6px 16px rgba(14,116,144,.35);
+  }
+  .player-fan.effect8-drop-active::before{
+    background:rgba(56,189,248,.28);
+    border-color:rgba(37,99,235,.85);
+    box-shadow:0 14px 30px rgba(37,99,235,.28);
+  }
 
   #myHandRow{ transform: translateY(30px); }
 
@@ -351,6 +384,11 @@
   /* ★⑦：配置フェーズ（手札ドラッグ） */
   .my-hand.effect7-place .my-card{
     animation: pickPulse 760ms ease-in-out infinite;
+    cursor:grab;
+  }
+  /* ★⑧：手札ドラッグ（手札全体が大小） */
+  .my-hand.effect8-return .my-card{
+    animation: pickPulse2 760ms ease-in-out infinite;
     cursor:grab;
   }
 
@@ -829,6 +867,7 @@ const state = {
   effect4: null,
   effect6: null,
   effect7: null,
+  effect8: null,
 
   eliminated: {},     // ★脱落者
   gameOver: null,     // ★ゲーム終了
@@ -853,6 +892,10 @@ const ui = {
   effect7Placing: false,
   effect7TargetSlot: null,
   effect7PickedValue: null,
+
+  effect8Selecting: false,
+  effect8Returning: false,
+  effect8TargetPlayerId: null,
 
   confirmAction: null,
 };
@@ -918,7 +961,7 @@ const ROLE_HELP = [
   { name: "（5）", text: "（効果説明をここに）" },
   { name: "（6）", text: "追加で1枚ドロー → 手札大小 → 1枚をドラッグして遺跡(2x3順番)へ配置" },
   { name: "（7）", text: "遺跡カード全て大小 → 1枚選んで手札へ → 手札大小＆ドラッグ → 空いた遺跡スロットへ配置" },
-  { name: "（8）", text: "（効果説明をここに）" },
+  { name: "（8）", text: "他プレイヤーの扇カードが大小アニメ → 1枚選ぶと点線矢印表示 → そのカードが自分の手札へ移動 → 自分の手札が大小＆ドラッグ可 → さっき選んだ相手にドラッグで渡す（他プレイヤーには裏向き移動表示）" },
   { name: "（x）", text: "効果なし（空振り）" },
 ];
 
@@ -992,6 +1035,7 @@ let lastDrawEventId = null;
 let lastReshuffleEventId = null;
 let lastRuinMoveEventId = null;
 let lastRuinTakeEventId = null;
+let lastHandTransferEventId = null;
 
 /* ★②戻すイベント */
 let lastReturnTopEventId = null;
@@ -1062,6 +1106,7 @@ function calcIsPlayable(){
   if (ui.effect4Selecting) return false;
   if (ui.effect6Selecting) return false;
   if (ui.effect7Picking || ui.effect7Placing) return false;
+  if (ui.effect8Selecting || ui.effect8Returning) return false;
 
   // 脱落者は操作不可
   if (state.eliminated?.[myId]) return false;
@@ -1077,6 +1122,7 @@ function updateTurnUI(){
   myHandEl.classList.toggle('effect2-pick', ui.effect2Selecting);
   myHandEl.classList.toggle('effect6-pick', ui.effect6Selecting);
   myHandEl.classList.toggle('effect7-place', ui.effect7Placing);
+  myHandEl.classList.toggle('effect8-return', ui.effect8Returning);
 
   playerCircle.classList.toggle('turn-paused', !!state.turn.paused);
 
@@ -1282,6 +1328,28 @@ function subscribeEffect7(){
   });
 }
 
+function subscribeEffect8(){
+  const eRef = ref(db, `rooms/${state.roomCode}/effect8`);
+  onValue(eRef, snap => {
+    state.effect8 = snap.val() || null;
+
+    const mine = state.effect8 && state.effect8.playerId === state.userId;
+    const selecting = !!(mine && state.effect8.phase === 'select');
+    const returning = !!(mine && state.effect8.phase === 'return');
+
+    ui.effect8Selecting = selecting;
+    ui.effect8Returning = returning;
+    ui.effect8TargetPlayerId = mine ? (state.effect8?.targetPlayerId ?? null) : null;
+
+    if (!returning && e8drag.active){
+      cleanupE8Drag();
+    }
+
+    updateTurnUI();
+    renderHands();
+  });
+}
+
 function subscribeTurn(){
   const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
   onValue(turnRef, async snap => {
@@ -1414,6 +1482,29 @@ function subscribeRuinTakeEvent(){
   });
 }
 
+/* ★⑧：手札↔手札（他プレイヤー視点：裏向き移動） */
+function subscribeHandTransferEvent(){
+  const evRef = ref(db, `rooms/${state.roomCode}/handTransferEvent`);
+  onValue(evRef, snap => {
+    const ev = snap.val();
+    if (!ev || !ev.id) return;
+    if (ev.id === lastHandTransferEventId) return;
+    lastHandTransferEventId = ev.id;
+
+    const now = Date.now();
+    if (ev.at && (now - ev.at) > 12000) return;
+
+    const fromPid = ev.fromPlayerId;
+    const toPid = ev.toPlayerId;
+    const byPid = ev.byPlayerId;
+
+    if (!fromPid || !toPid) return;
+    if (byPid && byPid === state.userId) return;
+
+    animateBackMoveBetweenPlayers(fromPid, toPid);
+  });
+}
+
 /* ★③：5スライド演出イベント */
 function subscribeFiveSlideEvent(){
   const evRef = ref(db, `rooms/${state.roomCode}/fiveSlideEvent`);
@@ -1467,6 +1558,9 @@ let e6drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overS
 /* ★⑦ドラッグ状態（指定スロットへドロップ） */
 let e7drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overSlot:false, slotIndex:null, sourceEl:null };
 
+/* ★⑧ドラッグ状態（相手へ返す） */
+let e8drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overTarget:false, targetPlayerId:null, sourceEl:null };
+
 function cleanupDrag(){
   if (drag.ghostEl) drag.ghostEl.remove();
   if (drag.sourceEl) drag.sourceEl.classList.remove('drag-source-hidden');
@@ -1501,6 +1595,33 @@ function cleanupE7Drag(){
   e7drag.overSlot = false;
   e7drag.slotIndex = null;
   clearRuinSlotHighlights();
+}
+function getEffect8TargetEl(){
+  if (!ui.effect8TargetPlayerId) return null;
+  return playerCircle.querySelector(`.player-fan[data-pid="${ui.effect8TargetPlayerId}"]`);
+}
+function setEffect8TargetHighlight(active){
+  const el = getEffect8TargetEl();
+  if (!el) return;
+  el.classList.toggle('effect8-drop-target', !!active);
+}
+function setEffect8TargetActive(active){
+  const el = getEffect8TargetEl();
+  if (!el) return;
+  el.classList.toggle('effect8-drop-active', !!active);
+}
+function cleanupE8Drag(){
+  if (e8drag.ghostEl) e8drag.ghostEl.remove();
+  if (e8drag.sourceEl) e8drag.sourceEl.classList.remove('drag-source-hidden');
+  e8drag.active = false;
+  e8drag.cardIndex = null;
+  e8drag.pointerId = null;
+  e8drag.ghostEl = null;
+  e8drag.sourceEl = null;
+  e8drag.overTarget = false;
+  e8drag.targetPlayerId = null;
+  setEffect8TargetActive(false);
+  setEffect8TargetHighlight(false);
 }
 
 function isPointInRect(x, y, rect){ return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom; }
@@ -1546,6 +1667,7 @@ function onCardPointerDown(e){
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
   if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting) return;
+  if (ui.effect8Selecting) return;
 
   if (ui.effect7Placing){
     const idx = Number(cardEl.dataset.index);
@@ -1575,6 +1697,40 @@ function onCardPointerDown(e){
     ghost.style.top  = `${e.clientY}px`;
 
     setRuinSlotActive(slotIndex, false);
+
+    cardEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
+
+  if (ui.effect8Returning){
+    const idx = Number(cardEl.dataset.index);
+    if (!Number.isFinite(idx)) return;
+
+    const targetId = ui.effect8TargetPlayerId;
+    if (!targetId) return;
+
+    setEffect8TargetHighlight(true);
+
+    e8drag.active = true;
+    e8drag.cardIndex = idx;
+    e8drag.pointerId = e.pointerId;
+    e8drag.targetPlayerId = targetId;
+    e8drag.overTarget = false;
+
+    e8drag.sourceEl = cardEl;
+    cardEl.classList.add('drag-source-hidden');
+
+    const ghost = document.createElement('div');
+    ghost.className = 'drag-ghost';
+    ghost.textContent = cardEl.textContent || '';
+    document.body.appendChild(ghost);
+    e8drag.ghostEl = ghost;
+
+    ghost.style.left = `${e.clientX}px`;
+    ghost.style.top  = `${e.clientY}px`;
+
+    setEffect8TargetActive(false);
 
     cardEl.setPointerCapture(e.pointerId);
     e.preventDefault();
@@ -1645,6 +1801,20 @@ function onCardPointerDown(e){
 }
 
 function onCardPointerMove(e){
+  if (e8drag.active && e8drag.pointerId === e.pointerId && e8drag.ghostEl){
+    e8drag.ghostEl.style.left = `${e.clientX}px`;
+    e8drag.ghostEl.style.top  = `${e.clientY}px`;
+
+    const targetEl = getEffect8TargetEl();
+    if (targetEl){
+      const r = targetEl.getBoundingClientRect();
+      const over = isPointInRect(e.clientX, e.clientY, r);
+      e8drag.overTarget = over;
+      setEffect8TargetActive(over);
+    }
+    return;
+  }
+
   if (e7drag.active && e7drag.pointerId === e.pointerId && e7drag.ghostEl){
     e7drag.ghostEl.style.left = `${e.clientX}px`;
     e7drag.ghostEl.style.top  = `${e.clientY}px`;
@@ -1688,6 +1858,15 @@ function onCardPointerMove(e){
 
 async function onCardPointerUp(e){
   const cardEl = e.currentTarget;
+
+  if (e8drag.active && e8drag.pointerId === e.pointerId){
+    const idx = e8drag.cardIndex;
+    const shouldDrop = e8drag.overTarget;
+    cleanupE8Drag();
+    try { cardEl.releasePointerCapture(e.pointerId); } catch {}
+    if (shouldDrop) await handleEffect8Drop(idx);
+    return;
+  }
 
   if (e7drag.active && e7drag.pointerId === e.pointerId){
     const idx = e7drag.cardIndex;
@@ -1789,7 +1968,7 @@ async function maybeAutoDrawAtTurnStart(){
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
 
-  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.effect7Picking || ui.effect7Placing) return;
+  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.effect7Picking || ui.effect7Placing || ui.effect8Selecting || ui.effect8Returning) return;
 
   autoDrawInFlight = true;
   const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
@@ -1939,6 +2118,18 @@ async function emitRuinTakeEvent(toPlayerId, cardValue, slotIndex){
     toPlayerId,
     cardValue: String(cardValue ?? ''),
     slotIndex: Number(slotIndex || 0),
+    at: Date.now()
+  });
+}
+
+async function emitHandTransferEvent(fromPlayerId, toPlayerId, byPlayerId){
+  if (!state.roomCode) return;
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/handTransferEvent`), {
+    id,
+    fromPlayerId,
+    toPlayerId,
+    byPlayerId,
     at: Date.now()
   });
 }
@@ -2154,6 +2345,104 @@ async function animateReturnTopFromCardRectToDeck(cardRect, cardValue){
   flyer.style.transition = 'opacity 140ms ease, transform 140ms ease';
   flyer.style.opacity = '0';
   flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.72)';
+  await sleep(160);
+
+  flyer.remove();
+}
+
+/* ★⑧：他プレイヤー視点：プレイヤー↔プレイヤー（裏向き） */
+async function animateBackMoveBetweenPlayers(fromPlayerId, toPlayerId){
+  const fromAnchor = getPlayerAnchorEl(fromPlayerId);
+  const toAnchor = getPlayerAnchorEl(toPlayerId);
+
+  const pc = playerCircle.getBoundingClientRect();
+  let startX = pc.left + pc.width/2;
+  let startY = pc.top + pc.height/2;
+  let endX = startX;
+  let endY = startY;
+
+  if (fromAnchor){
+    const fr = fromAnchor.getBoundingClientRect();
+    startX = fr.left + fr.width/2;
+    startY = fr.top + fr.height/2;
+  }
+  if (toAnchor){
+    const tr = toAnchor.getBoundingClientRect();
+    endX = tr.left + tr.width/2;
+    endY = tr.top + tr.height/2;
+  }
+
+  const flyer = document.createElement('div');
+  flyer.className = 'back-flyer';
+  flyer.style.left = `${startX}px`;
+  flyer.style.top  = `${startY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(10deg) scale(1.05)';
+  document.body.appendChild(flyer);
+
+  await sleep(0);
+  flyer.style.transition = 'transform 120ms ease, top 120ms ease';
+  flyer.style.top = `${startY - 14}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(18deg) scale(1.08)';
+  await sleep(140);
+
+  flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
+  flyer.style.left = `${endX}px`;
+  flyer.style.top  = `${endY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-10deg) scale(0.9)';
+  await sleep(440);
+
+  flyer.style.transition = 'opacity 140ms ease, transform 140ms ease';
+  flyer.style.opacity = '0';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.82)';
+  await sleep(160);
+
+  flyer.remove();
+}
+
+/* ★⑧：使用者視点：相手→自分の手札（表向き） */
+async function animateMoveFromPlayerToMyHand(fromPlayerId, cardValue){
+  const fromAnchor = getPlayerAnchorEl(fromPlayerId);
+  const pc = playerCircle.getBoundingClientRect();
+
+  let startX = pc.left + pc.width/2;
+  let startY = pc.top + pc.height/2;
+  if (fromAnchor){
+    const fr = fromAnchor.getBoundingClientRect();
+    startX = fr.left + fr.width/2;
+    startY = fr.top + fr.height/2;
+  }
+
+  const to = myHandEl?.getBoundingClientRect();
+  let endX = startX + 120;
+  let endY = startY + 120;
+  if (to){
+    endX = to.left + Math.min(40, to.width * 0.2);
+    endY = to.top + 18;
+  }
+
+  const flyer = document.createElement('div');
+  flyer.className = 'front-flyer';
+  flyer.textContent = String(cardValue ?? '');
+  flyer.style.left = `${startX}px`;
+  flyer.style.top  = `${startY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(0.9)';
+  document.body.appendChild(flyer);
+
+  await sleep(0);
+  flyer.style.transition = 'transform 120ms ease, top 120ms ease';
+  flyer.style.top = `${startY - 12}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-14deg) scale(1.0)';
+  await sleep(130);
+
+  flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
+  flyer.style.left = `${endX}px`;
+  flyer.style.top  = `${endY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(8deg) scale(1.05)';
+  await sleep(440);
+
+  flyer.style.transition = 'opacity 140ms ease, transform 140ms ease';
+  flyer.style.opacity = '0';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.92)';
   await sleep(160);
 
   flyer.remove();
@@ -2448,6 +2737,10 @@ async function playCardFromHand(cardIndex){
   }
   if (String(used) === '7'){
     await resolveEffect7(myId);
+    return;
+  }
+  if (String(used) === '8'){
+    await resolveEffect8(myId);
     return;
   }
 
@@ -2977,6 +3270,107 @@ async function handleEffect7Drop(cardIndex){
   await advanceTurnToNextPlayer();
 }
 
+/* =========================
+   ⑧：相手の手札を1枚 → 自分の手札へ → その相手に1枚返す
+   ========================= */
+async function resolveEffect8(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  await update(turnRef, { paused:true });
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effect8`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'select',
+    at: Date.now(),
+    targetPlayerId: null,
+    targetCardIndex: null,
+    pickedValue: null
+  });
+}
+
+async function handleEffect8Pick(targetPlayerId, cardIndex){
+  if (!state.roomCode) return;
+  const ef = state.effect8;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'select') return;
+  if (!targetPlayerId || targetPlayerId === state.userId) return;
+
+  const hand = state.hands?.[targetPlayerId];
+  const cards = Array.isArray(hand?.cards) ? hand.cards : [];
+  if (!cards.length) return;
+
+  const idx = Math.max(0, Math.min(cards.length - 1, Number(cardIndex || 0)));
+
+  const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${targetPlayerId}/cards`);
+  let removedValue = null;
+
+  const rem = await runTransaction(cardsRef, (cs) => {
+    const arr = Array.isArray(cs) ? [...cs] : [];
+    if (idx < 0 || idx >= arr.length) return arr;
+    removedValue = arr.splice(idx, 1)[0];
+    return arr;
+  }, { applyLocally:false });
+
+  if (!rem.committed || removedValue == null) return;
+
+  await emitHandTransferEvent(targetPlayerId, state.userId, state.userId);
+  await animateMoveFromPlayerToMyHand(targetPlayerId, removedValue);
+  await addCardToHandAtomic(state.userId, String(removedValue));
+
+  await set(ref(db, `rooms/${state.roomCode}/effect8`), {
+    id: ef.id,
+    playerId: ef.playerId,
+    seq: Number(ef.seq || 0),
+    phase: 'return',
+    at: Date.now(),
+    targetPlayerId,
+    targetCardIndex: idx,
+    pickedValue: String(removedValue)
+  });
+
+  updateTurnUI();
+}
+
+async function handleEffect8Drop(cardIndex){
+  if (!state.roomCode) return;
+  const ef = state.effect8;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'return') return;
+
+  const targetPlayerId = ef.targetPlayerId;
+  if (!targetPlayerId) return;
+
+  const myId = state.userId;
+  const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${myId}/cards`);
+  let removedValue = null;
+
+  const rem = await runTransaction(cardsRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    if (cardIndex < 0 || cardIndex >= arr.length) return arr;
+    removedValue = arr.splice(cardIndex, 1)[0];
+    return arr;
+  }, { applyLocally:false });
+
+  if (!rem.committed || removedValue == null) return;
+
+  await emitHandTransferEvent(myId, targetPlayerId, myId);
+  await addCardToHandAtomic(targetPlayerId, String(removedValue));
+
+  await set(ref(db, `rooms/${state.roomCode}/effect8`), null);
+
+  ui.effect8Selecting = false;
+  ui.effect8Returning = false;
+  ui.effect8TargetPlayerId = null;
+  updateTurnUI();
+  renderMyHand();
+
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
+}
+
 async function getSeatedPlayers(){
   const tablesSnap = await get(ref(db, `rooms/${state.roomCode}/tables`));
   const tables = tablesSnap.val() || {};
@@ -3059,6 +3453,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeEffect4();
   subscribeEffect6();
   subscribeEffect7();
+  subscribeEffect8();
 
   subscribeTurn();
   subscribeDrawEvent();
@@ -3066,6 +3461,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeReshuffleEvent();
   subscribeRuinMoveEvent();
   subscribeRuinTakeEvent();
+  subscribeHandTransferEvent();
 
   subscribeFiveSlideEvent();
   subscribeXRevealEvent();
@@ -3237,6 +3633,7 @@ function renderEffectArrowLayer(players){
 
   const ef3 = state.effect3;
   const ef4 = state.effect4;
+  const ef8 = state.effect8;
 
   // ③/④のどちらかが「確定（confirm/confirmAfterX）」なら矢印候補
   let fromPid = null, toPid = null, show = false;
@@ -3251,6 +3648,11 @@ function renderEffectArrowLayer(players){
     show = (state.userId !== ef4.playerId);
     fromPid = ef4.playerId;
     toPid = ef4.targetPlayerId;
+  }
+  if (ef8 && (ef8.phase === 'return') && ef8.playerId && ef8.targetPlayerId){
+    show = (state.userId !== ef8.playerId);
+    fromPid = ef8.playerId;
+    toPid = ef8.targetPlayerId;
   }
 
   if (!show){
@@ -3328,7 +3730,8 @@ function renderPlayerCircle(players){
   // ★③/④：使用者のみ選択可能か
   const e3MineSelecting = !!(state.effect3 && state.effect3.playerId === state.userId && state.effect3.phase === 'select');
   const e4MineSelecting = !!(state.effect4 && state.effect4.playerId === state.userId && state.effect4.phase === 'select');
-  const pickMode = (e3MineSelecting || e4MineSelecting) && !state.gameOver;
+  const e8MineSelecting = !!(state.effect8 && state.effect8.playerId === state.userId && state.effect8.phase === 'select');
+  const pickMode = (e3MineSelecting || e4MineSelecting || e8MineSelecting) && !state.gameOver;
 
   players.forEach((p, idx) => {
     const k = (meIndex === -1) ? idx : (idx - meIndex + n) % n;
@@ -3358,6 +3761,11 @@ function renderPlayerCircle(players){
       fan.style.top  = `${y}%`;
       fan.dataset.pid = p.id;
       fan.title = p.name;
+
+      if (ui.effect8Returning && ui.effect8TargetPlayerId === p.id && e8drag.active){
+        fan.classList.add('effect8-drop-target');
+        if (e8drag.overTarget) fan.classList.add('effect8-drop-active');
+      }
 
       // ★③/④選択中（使用者のみ）→ 他プレイヤーの扇をクリック可
       if (pickMode && !isElim){
@@ -3404,6 +3812,8 @@ function renderPlayerCircle(players){
               await handleEffect3Pick(pid, idxSel);
             } else if (e4MineSelecting){
               await handleEffect4Pick(pid, idxSel);
+            } else if (e8MineSelecting){
+              await handleEffect8Pick(pid, idxSel);
             }
           }, { once:true });
         }
@@ -3548,6 +3958,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect6`), null),
     set(ref(db, `rooms/${state.roomCode}/effect7`), null),
+    set(ref(db, `rooms/${state.roomCode}/effect8`), null),
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/gameOver`), null),
@@ -3558,6 +3969,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/ruinMoveEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/ruinTakeEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/returnTopEvent`), null),
+    set(ref(db, `rooms/${state.roomCode}/handTransferEvent`), null),
 
     set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), null),
@@ -3595,6 +4007,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effect4`)),
     remove(ref(db, `${base}/effect6`)),
     remove(ref(db, `${base}/effect7`)),
+    remove(ref(db, `${base}/effect8`)),
 
     remove(ref(db, `${base}/eliminated`)),
     remove(ref(db, `${base}/gameOver`)),
@@ -3608,6 +4021,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/ruinTakeEvent`)),
     remove(ref(db, `${base}/fiveSlideEvent`)),
     remove(ref(db, `${base}/xRevealEvent`)),
+    remove(ref(db, `${base}/handTransferEvent`)),
   ]);
   state.seatedTable = null;
   startPop.classList.add('hidden');
