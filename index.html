@@ -883,6 +883,10 @@
   .mini-card.exploration-pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
   }
+  .mini-card.exploration-picked{
+    transform:translate(-50%,0) rotate(var(--rot,0deg)) scale(1.4) !important;
+    z-index:90;
+  }
   .ruins-card.exploration-pickable{
     pointer-events:auto;
     cursor:pointer;
@@ -891,6 +895,10 @@
   }
   .ruins-card.exploration-pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
+  }
+  .ruins-card.exploration-picked{
+    transform:translate(-50%,-50%) scale(1.4);
+    z-index:90;
   }
 
   .exploration-center-card{
@@ -1362,11 +1370,13 @@ function revealExplorationCardFront(el, value){
 }
 
 function clearExplorationPickedCard(){
-  const picked = playerCircle.querySelector('.exploration-picked');
-  if (!picked) return;
-  picked.classList.remove('exploration-picked');
-  picked.classList.remove('exploration-front');
-  picked.textContent = '';
+  const picked = playerCircle.querySelectorAll('.exploration-picked');
+  if (!picked.length) return;
+  picked.forEach((el) => {
+    el.classList.remove('exploration-picked');
+    el.classList.remove('exploration-front');
+    el.textContent = '';
+  });
 }
 
 function cleanupExplorationSelection(){
