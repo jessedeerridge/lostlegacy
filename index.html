@@ -4367,17 +4367,15 @@ async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
   flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(1.1)';
   await sleep(440);
 
-  flyer.style.transition = 'transform 140ms ease, opacity 140ms ease, background 140ms ease, color 140ms ease';
-  flyer.style.transform = 'translate(-50%,-50%) scale(0.82)';
+  flyer.style.transition = 'background 120ms ease, color 120ms ease, opacity 120ms ease';
   flyer.style.backgroundImage = 'var(--card-back-image)';
   flyer.style.backgroundColor = '#fff';
   flyer.style.backgroundSize = 'cover';
   flyer.style.backgroundPosition = 'center';
   flyer.style.color = 'transparent';
-  flyer.style.opacity = '0.95';
   const faceEl = flyer.querySelector('.card-face');
   if (faceEl) faceEl.style.opacity = '0';
-  await sleep(160);
+  await sleep(140);
 
   await waitForRuinCard(slotIndex);
 
@@ -4429,17 +4427,15 @@ async function animateXRevealMoveToRuin(playerId, cardIndex, slotIndex){
   flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(1.1)';
   await sleep(440);
 
-  flyer.style.transition = 'transform 140ms ease, opacity 140ms ease, background 140ms ease, color 140ms ease';
-  flyer.style.transform = 'translate(-50%,-50%) scale(0.82)';
+  flyer.style.transition = 'background 120ms ease, color 120ms ease, opacity 120ms ease';
   flyer.style.backgroundImage = 'var(--card-back-image)';
   flyer.style.backgroundColor = '#fff';
   flyer.style.backgroundSize = 'cover';
   flyer.style.backgroundPosition = 'center';
   flyer.style.color = 'transparent';
-  flyer.style.opacity = '0.95';
   const faceEl = flyer.querySelector('.card-face');
   if (faceEl) faceEl.style.opacity = '0';
-  await sleep(160);
+  await sleep(140);
 
   await waitForRuinCard(slotIndex);
 
