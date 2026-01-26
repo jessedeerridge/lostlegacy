@@ -456,6 +456,9 @@
     font-size:10px;
     white-space:pre-line;
   }
+  .played-card .card-decor-right{
+    right:2%;
+  }
 
   .my-hand-wrapper{margin-top:16px;text-align:center;}
   .my-hand-title{display:none;}
@@ -1395,6 +1398,15 @@ function setCardFace(el, value){
   face.appendChild(overlay);
   el.appendChild(face);
 }
+function setCardBack(el){
+  if (!el) return;
+  el.dataset.value = '';
+  el.innerHTML = '';
+  el.style.backgroundImage = 'var(--card-back-image)';
+  el.style.backgroundSize = 'cover';
+  el.style.backgroundPosition = 'center';
+  el.style.backgroundRepeat = 'no-repeat';
+}
 
 /* ★遺跡を下げた分（CSSと合わせる） */
 const RUINS_SHIFT_Y = 14;
@@ -1446,6 +1458,8 @@ const ui = {
   effect8Selecting: false,
   effect8Returning: false,
   effect8TargetPlayerId: null,
+
+  ruinSlotHideUntil: {},
 
   confirmAction: null,
 };
@@ -2279,10 +2293,12 @@ function subscribeRuinMoveEvent(){
     if (fromPid === state.userId && mode !== 'oneReveal') return;
 
     if (mode === 'oneReveal'){
+      hideRuinSlotUntilAnimationDone(slotIndex, 980);
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
       return;
     }
 
+    hideRuinSlotUntilAnimationDone(slotIndex, 820);
     animateMoveFromPlayerToRuin(fromPid, String(cardValue ?? ''), slotIndex);
   });
 }
@@ -2543,6 +2559,29 @@ function setRuinSlotActive(slotIndex, active){
   if (!el) return;
   el.classList.toggle('active-drop', !!active);
 }
+function hideRuinSlotUntilAnimationDone(slotIndex, durationMs = 820){
+  if (!Number.isFinite(Number(slotIndex))) return;
+  const idx = Number(slotIndex);
+  ui.ruinSlotHideUntil[idx] = Date.now() + durationMs;
+  setTimeout(() => {
+    const until = ui.ruinSlotHideUntil[idx];
+    if (!until) return;
+    if (Date.now() >= until){
+      delete ui.ruinSlotHideUntil[idx];
+      renderHands();
+    }
+  }, durationMs + 30);
+}
+function isRuinSlotHidden(slotIndex){
+  const idx = Number(slotIndex);
+  const until = ui.ruinSlotHideUntil[idx];
+  if (!until) return false;
+  if (Date.now() >= until){
+    delete ui.ruinSlotHideUntil[idx];
+    return false;
+  }
+  return true;
+}
 function setDeckDropHint(active){
   if (!deckPile) return;
   deckPile.classList.toggle('effect2-drop-target', !!active);
@@ -2619,7 +2658,7 @@ function onCardPointerDown(e){
 
     const ghost = document.createElement('div');
     ghost.className = 'drag-ghost';
-    setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
+    setCardBack(ghost);
     document.body.appendChild(ghost);
     e7drag.ghostEl = ghost;
 
@@ -2897,7 +2936,7 @@ function onRuinPointerDown(e){
 
   const ghost = document.createElement('div');
   ghost.className = 'drag-ghost';
-  setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
+  setCardBack(ghost);
   document.body.appendChild(ghost);
   e7pickDrag.ghostEl = ghost;
 
@@ -3390,7 +3429,7 @@ async function animateReturnTopFromCardRectToDeck(cardRect, cardValue){
 
   const flyer = document.createElement('div');
   flyer.className = 'front-flyer';
-  flyer.textContent = String(cardValue ?? '');
+  setCardFace(flyer, cardValue);
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1.0)';
@@ -3488,7 +3527,7 @@ async function animateMoveFromPlayerToMyHand(fromPlayerId, cardValue){
 
   const flyer = document.createElement('div');
   flyer.className = 'front-flyer';
-  flyer.textContent = String(cardValue ?? '');
+  setCardFace(flyer, cardValue);
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(0.9)';
@@ -5003,6 +5042,7 @@ function renderRuinsArea(){
   for (let i=0;i<6;i++){
     const item = slots[i];
     if (!item) continue;
+    if (isRuinSlotHidden(i)) continue;
 
     const card = document.createElement('div');
     card.className = 'ruins-card';
@@ -5309,13 +5349,12 @@ function renderPlayerCircle(players){
       row.style.left = `${x}%`;
       row.style.top  = `${y}%`;
 
-      const toCenterDeg = radToDeg(angle + Math.PI);
-      const cardRotate = toCenterDeg + 90;
+      const cardRotate = 0;
 
       const MAX_SHOW = 10;
       const slice = playedArr.slice(Math.max(0, playedArr.length - MAX_SHOW));
 
-      const parallel = (p.id !== state.userId) && (slice.length === 2 || slice.length === 3 || slice.length === 4);
+      const parallel = false;
 
       if (parallel){
         row.style.transform =
