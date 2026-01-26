@@ -2140,7 +2140,7 @@ async function animateExplorationCenterDrop(value){
 async function handleExplorationSelection(value, { keepFront = false, explorerId = null } = {}){
   if (!value) return;
   if (String(value) === '5'){
-    await animateGlobalFiveSlide();
+    await triggerFiveSlideEvent();
     if (state.isHost && !state.gameOver){
       await setGameOverFoundFive(explorerId);
     }
@@ -2182,7 +2182,7 @@ async function runExplorationPhaseSequence(eventId){
         const myCards = Array.isArray(state.hands?.[pid]?.cards) ? state.hands[pid].cards : [];
         if (myCards.some((v) => String(v) === '5')){
           await sleep(920);
-          await animateGlobalFiveSlide();
+          await triggerFiveSlideEvent();
           if (state.isHost && !state.gameOver){
             await setGameOverFoundFive(pid);
           }
@@ -3565,6 +3565,17 @@ async function emitFiveSlideEvent(){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), { id, at: Date.now() });
+}
+
+async function triggerFiveSlideEvent({ animate = true } = {}){
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  lastFiveSlideEventId = id;
+  if (animate){
+    await animateGlobalFiveSlide();
+  }
+  if (!state.roomCode) return id;
+  await set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), { id, at: Date.now() });
+  return id;
 }
 async function emitXRevealEvent(mode, targetPlayerId, fromPlayerId, targetCardIndex){
   if (!state.roomCode) return;
@@ -4983,7 +4994,7 @@ async function handleEffect3Pick(targetPlayerId, cardIndex){
     hideConfirmPop();
 
     await sleep(FIVE_ARROW_DELAY_MS);
-    await emitFiveSlideEvent();
+    await triggerFiveSlideEvent();
     await sleep(FIVE_SLIDE_TOTAL_MS);
     if (!state.gameOver){
       await setGameOverFoundFive(ef.playerId);
@@ -5078,6 +5089,20 @@ async function handleEffect4Pick(targetPlayerId, cardIndex){
     targetCardIndex: idx,
     revealed
   });
+
+  if (revealed === '5'){
+    hidePeekCard();
+    hideConfirmPop();
+
+    await sleep(FIVE_ARROW_DELAY_MS);
+    await triggerFiveSlideEvent();
+    await sleep(FIVE_SLIDE_TOTAL_MS);
+    if (!state.gameOver){
+      await setGameOverFoundFive(ef.playerId);
+    }
+
+    await set(ref(db, `rooms/${state.roomCode}/effect4`), null);
+  }
 }
 
 async function finishEffect4AndAdvance(){
