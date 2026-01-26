@@ -4758,26 +4758,45 @@ function renderEffectArrowLayer(players){
   svg.setAttribute('height', String(h));
 
   const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
-  const marker = document.createElementNS('http://www.w3.org/2000/svg','marker');
   const markerId = `arrowHead-${Math.random().toString(16).slice(2)}`;
-  marker.setAttribute('id', markerId);
-  marker.setAttribute('markerWidth', '10');
-  marker.setAttribute('markerHeight', '10');
-  marker.setAttribute('refX', '8');
-  marker.setAttribute('refY', '5');
-  marker.setAttribute('orient', 'auto');
-  const path = document.createElementNS('http://www.w3.org/2000/svg','path');
-  path.setAttribute('d', 'M0,0 L10,5 L0,10 Z');
-  path.setAttribute('class', 'head');
-  marker.appendChild(path);
-  defs.appendChild(marker);
+  const markerEndId = `${markerId}-end`;
+  const markerStartId = `${markerId}-start`;
+
+  const markerEnd = document.createElementNS('http://www.w3.org/2000/svg','marker');
+  markerEnd.setAttribute('id', markerEndId);
+  markerEnd.setAttribute('markerWidth', '10');
+  markerEnd.setAttribute('markerHeight', '10');
+  markerEnd.setAttribute('refX', '8');
+  markerEnd.setAttribute('refY', '5');
+  markerEnd.setAttribute('orient', 'auto');
+  const endPath = document.createElementNS('http://www.w3.org/2000/svg','path');
+  endPath.setAttribute('d', 'M0,0 L10,5 L0,10 Z');
+  endPath.setAttribute('class', 'head');
+  markerEnd.appendChild(endPath);
+  defs.appendChild(markerEnd);
+
+  if (config.bothEnds){
+    const markerStart = document.createElementNS('http://www.w3.org/2000/svg','marker');
+    markerStart.setAttribute('id', markerStartId);
+    markerStart.setAttribute('markerWidth', '10');
+    markerStart.setAttribute('markerHeight', '10');
+    markerStart.setAttribute('refX', '2');
+    markerStart.setAttribute('refY', '5');
+    markerStart.setAttribute('orient', 'auto-start-reverse');
+    const startPath = document.createElementNS('http://www.w3.org/2000/svg','path');
+    startPath.setAttribute('d', 'M0,0 L10,5 L0,10 Z');
+    startPath.setAttribute('class', 'head');
+    markerStart.appendChild(startPath);
+    defs.appendChild(markerStart);
+  }
+
   svg.appendChild(defs);
 
   const line = document.createElementNS('http://www.w3.org/2000/svg','line');
   line.setAttribute('class', 'line');
-  line.setAttribute('marker-end', `url(#${markerId})`);
+  line.setAttribute('marker-end', `url(#${markerEndId})`);
   if (config.bothEnds){
-    line.setAttribute('marker-start', `url(#${markerId})`);
+    line.setAttribute('marker-start', `url(#${markerStartId})`);
   }
   svg.appendChild(line);
 
