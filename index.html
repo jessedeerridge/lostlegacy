@@ -1037,6 +1037,13 @@
     z-index:990;
   }
   .gameover-pop.hidden{ display:none; }
+  .gameover-pop.found5 .gameover-box{
+    background:#000;
+    color:#fff;
+    border-color:rgba(255,255,255,.15);
+  }
+  .gameover-pop.found5 .ttl{ display:none; }
+  .gameover-pop.found5 .txt{ white-space:nowrap; }
   .gameover-box{
     background:#fff;
     border-radius:16px;
@@ -2466,6 +2473,7 @@ function updateTurnUI(){
   playerCircle.classList.toggle('turn-paused', !!state.turn.paused);
 
   if (state.gameOver){
+    gameOverPop.classList.toggle('found5', state.gameOver?.reason === 'found5');
     if (state.gameOver?.reason === 'found5'){
       showGameOver(state.gameOver?.text || 'ゲーム終了');
       hideCenterNotice();
@@ -2477,6 +2485,7 @@ function updateTurnUI(){
       hideCenterNotice();
     }
   } else {
+    gameOverPop.classList.remove('found5');
     hideGameOver();
     hideCenterNotice();
   }
