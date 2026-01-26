@@ -1573,15 +1573,25 @@ function setCardFace(el, value){
     : (isLargeFace ? { minSize: 12, maxSize: 16 }
       : (isMiniZoom ? { minSize: 4, maxSize: 9 }
         : (isCompactFace ? { minSize: 3, maxSize: 8 } : { minSize: 4, maxSize: 10 })));
-  requestAnimationFrame(() => {
-    fitTextToBox(decorRight, effectText, fitOptions);
-  });
+  const scheduleFit = () => {
+    requestAnimationFrame(() => {
+      fitTextToBox(decorRight, effectText, fitOptions);
+    });
+  };
+  scheduleFit();
   if (!decorRight._fitObserver && 'ResizeObserver' in window){
     const ro = new ResizeObserver(() => {
-      fitTextToBox(decorRight, effectText, fitOptions);
+      scheduleFit();
     });
     ro.observe(decorRight);
     decorRight._fitObserver = ro;
+  }
+  if (!decorRight._fitMutation && 'MutationObserver' in window){
+    const mo = new MutationObserver(() => {
+      scheduleFit();
+    });
+    mo.observe(el, { attributes:true, attributeFilter:['class', 'style'] });
+    decorRight._fitMutation = mo;
   }
 
   overlay.appendChild(title);
