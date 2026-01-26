@@ -1051,10 +1051,10 @@
   }
 
   @keyframes explorationFlip{
-    0%{ transform:rotateY(0deg); }
-    40%{ transform:rotateY(180deg); color:transparent; background-image:var(--card-back-image); background-color:#fff; background-size:cover; background-position:center; }
-    70%{ transform:rotateY(260deg); }
-    100%{ transform:rotateY(360deg); color:#111; background:#fff; }
+    0%{ transform:rotateY(0deg) rotateZ(0deg); }
+    40%{ transform:rotateY(180deg) rotateZ(90deg); color:transparent; background-image:var(--card-back-image); background-color:#fff; background-size:cover; background-position:center; }
+    70%{ transform:rotateY(260deg) rotateZ(180deg); }
+    100%{ transform:rotateY(360deg) rotateZ(360deg); color:#111; background:#fff; }
   }
   .my-hand-row.exploration-flip .my-card{
     animation: explorationFlip 900ms ease-in-out 1;
@@ -1080,6 +1080,23 @@
   }
   .player-fan.exploration-shake{ animation: explorationShake 520ms ease-in-out infinite; }
   .my-hand-row.exploration-shake{ animation: explorationShakeMe 520ms ease-in-out infinite; }
+
+  @keyframes explorationTieShake{
+    0%{ transform:translate(-50%,-50%) scale(1.4) rotate(0deg); }
+    25%{ transform:translate(-50%,-50%) scale(1.4) rotate(3deg); }
+    50%{ transform:translate(-50%,-50%) scale(1.4) rotate(-3deg); }
+    75%{ transform:translate(-50%,-50%) scale(1.4) rotate(2deg); }
+    100%{ transform:translate(-50%,-50%) scale(1.4) rotate(0deg); }
+  }
+  @keyframes explorationTieShakeMe{
+    0%{ transform:translateY(30px) scale(1.4) rotate(0deg); }
+    25%{ transform:translateY(30px) scale(1.4) rotate(3deg); }
+    50%{ transform:translateY(30px) scale(1.4) rotate(-3deg); }
+    75%{ transform:translateY(30px) scale(1.4) rotate(2deg); }
+    100%{ transform:translateY(30px) scale(1.4) rotate(0deg); }
+  }
+  .player-fan.exploration-tie-shake{ animation: explorationTieShake 240ms ease-in-out 2; }
+  .my-hand-row.exploration-tie-shake{ animation: explorationTieShakeMe 240ms ease-in-out 2; }
 
   .mini-card.exploration-pickable{
     pointer-events:auto;
@@ -1118,11 +1135,9 @@
     border:2px solid rgba(37,99,235,.15);
     background:#fff;
     box-shadow:0 22px 56px rgba(0,0,0,.35);
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    font-size:56px;
-    font-weight:1000;
+    display:block;
+    --card-title-size:16px;
+    --card-reading-size:12px;
     transform:translate(-50%,-50%) scale(1.12);
     opacity:0;
     z-index:998;
@@ -1782,14 +1797,14 @@ function setXRevealHand(playerId, active){
   });
 }
 
-function setExplorationShake(playerId, active){
+function setExplorationTieShake(playerId, active){
   if (playerId === state.userId){
-    myHandRow.classList.toggle('exploration-shake', active);
+    myHandRow.classList.toggle('exploration-tie-shake', active);
     return;
   }
   const fan = playerCircle.querySelector(`.player-fan[data-pid="${playerId}"]`);
   if (!fan) return;
-  fan.classList.toggle('exploration-shake', active);
+  fan.classList.toggle('exploration-tie-shake', active);
 }
 
 function revealExplorationCardFront(el, value){
@@ -1817,8 +1832,26 @@ function cleanupExplorationSelection(){
   }
 }
 
-function waitForExplorationSelection(activePlayerId){
-  if (activePlayerId !== state.userId) return Promise.resolve(null);
+function waitForExplorationPickEvent({ eventId, rank, playerId } = {}){
+  if (!state.roomCode) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const evRef = ref(db, `rooms/${state.roomCode}/explorationPickEvent`);
+    const unsubscribe = onValue(evRef, (snap) => {
+      const ev = snap.val();
+      if (!ev || !ev.id) return;
+      if (eventId && ev.eventId !== eventId) return;
+      if (Number.isFinite(rank) && ev.rank !== rank) return;
+      if (playerId && ev.playerId !== playerId) return;
+      unsubscribe();
+      resolve(ev);
+    });
+  });
+}
+
+function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
+  if (activePlayerId !== state.userId){
+    return waitForExplorationPickEvent({ eventId, rank, playerId: activePlayerId });
+  }
 
   return new Promise((resolve) => {
     const pickables = [];
@@ -1839,10 +1872,16 @@ function waitForExplorationSelection(activePlayerId){
     let resolved = false;
     const listeners = [];
 
-    const finalize = (selection) => {
+    const finalize = async (selection) => {
       if (resolved) return;
       resolved = true;
       cleanupExplorationSelection();
+      await emitExplorationPickEvent({
+        eventId,
+        rank,
+        playerId: state.userId,
+        value: selection?.value ?? null,
+      });
       resolve(selection);
     };
 
@@ -1877,7 +1916,7 @@ function waitForExplorationSelection(activePlayerId){
 async function animateExplorationCenterDrop(value){
   const card = document.createElement('div');
   card.className = 'exploration-center-card';
-  card.textContent = String(value ?? '');
+  setCardFace(card, value);
   document.body.appendChild(card);
 
   await sleep(0);
@@ -1901,7 +1940,7 @@ async function handleExplorationSelection(value){
   clearExplorationPickedCard();
 }
 
-async function runExplorationPhaseSequence(){
+async function runExplorationPhaseSequence(eventId){
   if (explorationSequenceActive) return;
   explorationSequenceActive = true;
 
@@ -1913,25 +1952,20 @@ async function runExplorationPhaseSequence(){
     for (const group of groups){
       if (!group.players.length) continue;
 
+      group.players.forEach((pid) => setPlayerHandReveal(pid, true, { flip: pid === state.userId }));
+
       if (group.players.length > 1){
-        group.players.forEach((pid) => setPlayerHandReveal(pid, true));
-        await sleep(180);
-        group.players.forEach((pid) => setExplorationShake(pid, true));
+        await sleep(140);
+        group.players.forEach((pid) => setExplorationTieShake(pid, true));
         await sleep(1500);
-        group.players.forEach((pid) => setExplorationShake(pid, false));
+        group.players.forEach((pid) => setExplorationTieShake(pid, false));
         group.players.forEach((pid) => setPlayerHandReveal(pid, false));
         continue;
       }
 
       const pid = group.players[0];
-      setPlayerHandReveal(pid, true, { flip: pid === state.userId });
-
-      if (pid === state.userId){
-        const selection = await waitForExplorationSelection(pid);
-        await handleExplorationSelection(selection?.value);
-      } else {
-        await sleep(2000);
-      }
+      const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
+      await handleExplorationSelection(selection?.value);
 
       setPlayerHandReveal(pid, false);
     }
@@ -2520,7 +2554,7 @@ function subscribeExplorationFaceEvent(){
     const now = Date.now();
     if (ev.at && (now - ev.at) > 20000) return;
 
-    runExplorationPhaseSequence();
+    runExplorationPhaseSequence(ev.id);
   });
 }
 
@@ -3253,6 +3287,19 @@ async function emitExplorationFaceEvent(){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/explorationFaceEvent`), { id, at: Date.now() });
+}
+
+async function emitExplorationPickEvent({ eventId, rank, playerId, value } = {}){
+  if (!state.roomCode) return;
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/explorationPickEvent`), {
+    id,
+    eventId: eventId || null,
+    rank: Number.isFinite(rank) ? rank : null,
+    playerId: playerId || null,
+    value: value ?? null,
+    at: Date.now(),
+  });
 }
 
 function shuffleInPlace(arr){
@@ -5576,6 +5623,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/returnTopEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/handTransferEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/explorationFaceEvent`), null),
+    set(ref(db, `rooms/${state.roomCode}/explorationPickEvent`), null),
 
     set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), null),
@@ -5630,6 +5678,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/xRevealEvent`)),
     remove(ref(db, `${base}/oneRevealEvent`)),
     remove(ref(db, `${base}/explorationFaceEvent`)),
+    remove(ref(db, `${base}/explorationPickEvent`)),
     remove(ref(db, `${base}/handTransferEvent`)),
   ]);
   state.seatedTable = null;
