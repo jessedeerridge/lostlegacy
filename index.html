@@ -1493,7 +1493,7 @@ function fitTextToBox(container, textEl, { minSize = 4, maxSize = 10 } = {}){
   if (!rect.width || !rect.height){
     const approx = Math.max(minSize, Math.min(maxSize, Math.floor(42 / Math.max(1, text.length))));
     textEl.style.fontSize = `${approx}px`;
-    return;
+    return false;
   }
 
   const maxByHeight = Math.floor(rect.height * 0.6);
@@ -1507,6 +1507,7 @@ function fitTextToBox(container, textEl, { minSize = 4, maxSize = 10 } = {}){
     textEl.style.fontSize = `${size}px`;
     if (size <= minSize) break;
   }
+  return true;
 }
 
 function setCardFace(el, value){
@@ -1573,15 +1574,23 @@ function setCardFace(el, value){
     : (isLargeFace ? { minSize: 12, maxSize: 16 }
       : (isMiniZoom ? { minSize: 4, maxSize: 9 }
         : (isCompactFace ? { minSize: 3, maxSize: 8 } : { minSize: 4, maxSize: 10 })));
-  requestAnimationFrame(() => {
-    fitTextToBox(decorRight, effectText, fitOptions);
-  });
+  const scheduleFit = (attempt = 0) => {
+    const measured = fitTextToBox(decorRight, effectText, fitOptions);
+    if (!measured && attempt < 2){
+      requestAnimationFrame(() => scheduleFit(attempt + 1));
+    }
+  };
+  requestAnimationFrame(() => scheduleFit());
   if (!decorRight._fitObserver && 'ResizeObserver' in window){
     const ro = new ResizeObserver(() => {
-      fitTextToBox(decorRight, effectText, fitOptions);
+      scheduleFit();
     });
     ro.observe(decorRight);
-    decorRight._fitObserver = ro;
+    const mo = new MutationObserver(() => {
+      scheduleFit();
+    });
+    mo.observe(el, { attributes:true, attributeFilter:['class'] });
+    decorRight._fitObserver = { ro, mo };
   }
 
   overlay.appendChild(title);
