@@ -1367,6 +1367,20 @@ function fitTextToBox(container, textEl, { minSize = 4, maxSize = 10 } = {}){
   }
 }
 
+function scheduleFitTextToBox(container, textEl, fitOptions){
+  let attempts = 0;
+  const run = () => {
+    attempts += 1;
+    const rect = container.getBoundingClientRect();
+    if ((!rect.width || !rect.height) && attempts < 12){
+      requestAnimationFrame(run);
+      return;
+    }
+    fitTextToBox(container, textEl, fitOptions);
+  };
+  requestAnimationFrame(run);
+}
+
 function setCardFace(el, value){
   if (!el) return;
   const key = normalizeCardValue(value);
@@ -1416,10 +1430,13 @@ function setCardFace(el, value){
   effectText.className = 'card-effect-text';
   effectText.textContent = getCardEffectText(key);
   decorRight.appendChild(effectText);
-  const fitOptions = el.classList.contains('played-card') ? { minSize: 3, maxSize: 9 } : { minSize: 4, maxSize: 10 };
-  requestAnimationFrame(() => {
-    fitTextToBox(decorRight, effectText, fitOptions);
-  });
+  const isPlayed = el.classList.contains('played-card');
+  const isLarge = el.classList.contains('peek-card')
+    || el.classList.contains('global-x-card')
+    || el.classList.contains('global-one-card')
+    || el.classList.contains('global-slide-card');
+  const fitOptions = isPlayed ? { minSize: 3, maxSize: 9 } : (isLarge ? { minSize: 6, maxSize: 16 } : { minSize: 4, maxSize: 10 });
+  scheduleFitTextToBox(decorRight, effectText, fitOptions);
   if (!decorRight._fitObserver && 'ResizeObserver' in window){
     const ro = new ResizeObserver(() => {
       fitTextToBox(decorRight, effectText, fitOptions);
