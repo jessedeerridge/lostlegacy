@@ -349,8 +349,8 @@
     transform-origin:bottom center;
     box-shadow:0 2px 6px rgba(0,0,0,.15);
     pointer-events:none;
-    --card-title-size:6px;
-    --card-reading-size:4px;
+    --card-title-size:4.4px;
+    --card-reading-size:3.6px;
   }
 
   /* ★③/④：扇カードが大小アニメ＆クリック可（使用者のみ） */
@@ -761,8 +761,8 @@
     pointer-events:none;
     user-select:none;
     color:transparent;
-    --card-title-size:7px;
-    --card-reading-size:5px;
+    --card-title-size:7.6px;
+    --card-reading-size:6.4px;
   }
 
   @keyframes ruinsPulse {
@@ -1031,11 +1031,11 @@
   .exploration-pop.hidden{ display:none; }
 
   .player-fan.exploration-reveal{
-    transform:translate(-50%,-50%) scale(1.4);
+    transform:translate(-50%,-50%) scale(1.5);
     z-index:60;
   }
   .my-hand-row.exploration-reveal{
-    transform:translateY(30px) scale(1.4);
+    transform:translateY(30px) scale(1.5);
     z-index:60;
   }
   .mini-card.exploration-front,
@@ -1454,7 +1454,13 @@ function setCardFace(el, value){
   effectText.className = 'card-effect-text';
   effectText.textContent = getCardEffectText(key);
   decorRight.appendChild(effectText);
-  const fitOptions = el.classList.contains('played-card') ? { minSize: 3, maxSize: 9 } : { minSize: 4, maxSize: 10 };
+  const isLargeFace = el.classList.contains('peek-card')
+    || el.classList.contains('exploration-center-card')
+    || el.classList.contains('global-x-card')
+    || el.classList.contains('global-one-card');
+  const fitOptions = el.classList.contains('played-card')
+    ? { minSize: 3, maxSize: 9 }
+    : (isLargeFace ? { minSize: 10, maxSize: 12 } : { minSize: 4, maxSize: 10 });
   requestAnimationFrame(() => {
     fitTextToBox(decorRight, effectText, fitOptions);
   });
@@ -1823,13 +1829,15 @@ function revealExplorationCardFront(el, value){
   setCardFace(el, value);
 }
 
-function clearExplorationPickedCard(){
+function clearExplorationPickedCard({ keepFront = false } = {}){
   const picked = playerCircle.querySelectorAll('.exploration-picked');
   if (!picked.length) return;
   picked.forEach((el) => {
+    if (!keepFront){
+      el.classList.remove('exploration-front');
+      clearCardFaceVisual(el);
+    }
     el.classList.remove('exploration-picked');
-    el.classList.remove('exploration-front');
-    clearCardFaceVisual(el);
   });
 }
 
@@ -1937,15 +1945,15 @@ async function animateExplorationCenterDrop(value){
   card.remove();
 }
 
-async function handleExplorationSelection(value){
+async function handleExplorationSelection(value, { keepFront = false } = {}){
   if (!value) return;
   if (String(value) === '5'){
     await animateGlobalFiveSlide();
-    clearExplorationPickedCard();
+    clearExplorationPickedCard({ keepFront });
     return;
   }
   await animateExplorationCenterDrop(value);
-  clearExplorationPickedCard();
+  clearExplorationPickedCard({ keepFront });
 }
 
 async function runExplorationPhaseSequence(eventId){
@@ -1973,9 +1981,11 @@ async function runExplorationPhaseSequence(eventId){
 
       const pid = group.players[0];
       const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
-      await handleExplorationSelection(selection?.value);
+      await handleExplorationSelection(selection?.value, { keepFront: pid === state.userId });
 
-      setPlayerHandReveal(pid, false);
+      if (pid !== state.userId){
+        setPlayerHandReveal(pid, false);
+      }
     }
   } finally {
     cleanupExplorationSelection();
@@ -4444,8 +4454,8 @@ async function handleEffect2Pick(cardIndex, cardEl){
     }
   }
 
-  // 自分：表で「選んだカードの位置→山札」アニメ
-  await animateReturnTopFromCardRectToDeck(fixedRect, pickedValue);
+  // 自分：移動アニメなし（他プレイヤーは裏アニメのみ）
+  // await animateReturnTopFromCardRectToDeck(fixedRect, pickedValue);
 
   // 他プレイヤー：裏で「その人→山札」アニメ（イベント）
   await emitReturnTopEvent(myId);
