@@ -349,6 +349,8 @@
     transform-origin:bottom center;
     box-shadow:0 2px 6px rgba(0,0,0,.15);
     pointer-events:none;
+    --card-title-size:4.4px;
+    --card-reading-size:3.6px;
   }
 
   /* ★③/④：扇カードが大小アニメ＆クリック可（使用者のみ） */
@@ -759,6 +761,8 @@
     pointer-events:none;
     user-select:none;
     color:transparent;
+    --card-title-size:7.6px;
+    --card-reading-size:6.4px;
   }
 
   @keyframes ruinsPulse {
@@ -1027,11 +1031,11 @@
   .exploration-pop.hidden{ display:none; }
 
   .player-fan.exploration-reveal{
-    transform:translate(-50%,-50%) scale(1.4);
+    transform:translate(-50%,-50%) scale(1.5);
     z-index:60;
   }
   .my-hand-row.exploration-reveal{
-    transform:translateY(30px) scale(1.4);
+    transform:translateY(30px) scale(1.5);
     z-index:60;
   }
   .mini-card.exploration-front,
@@ -1450,7 +1454,13 @@ function setCardFace(el, value){
   effectText.className = 'card-effect-text';
   effectText.textContent = getCardEffectText(key);
   decorRight.appendChild(effectText);
-  const fitOptions = el.classList.contains('played-card') ? { minSize: 3, maxSize: 9 } : { minSize: 4, maxSize: 10 };
+  const isLargeFace = el.classList.contains('peek-card')
+    || el.classList.contains('exploration-center-card')
+    || el.classList.contains('global-x-card')
+    || el.classList.contains('global-one-card');
+  const fitOptions = el.classList.contains('played-card')
+    ? { minSize: 3, maxSize: 9 }
+    : (isLargeFace ? { minSize: 10, maxSize: 12 } : { minSize: 4, maxSize: 10 });
   requestAnimationFrame(() => {
     fitTextToBox(decorRight, effectText, fitOptions);
   });
@@ -1467,6 +1477,12 @@ function setCardFace(el, value){
   overlay.appendChild(decorRight);
   face.appendChild(overlay);
   el.appendChild(face);
+}
+
+function clearCardFaceVisual(el){
+  if (!el) return;
+  el.innerHTML = '';
+  el.style.removeProperty('--card-image');
 }
 
 function createFaceFlyer(cardValue){
@@ -1735,7 +1751,7 @@ function setPlayerHandReveal(playerId, active, { flip = false } = {}){
   miniCards.forEach((card, idx) => {
     if (active){
       card.classList.add('exploration-front');
-      card.textContent = String(cards[idx] ?? '');
+      setCardFace(card, cards[idx]);
       if (wasActive){
         card.classList.add('exploration-reopen');
         card.addEventListener('animationend', () => {
@@ -1744,7 +1760,7 @@ function setPlayerHandReveal(playerId, active, { flip = false } = {}){
       }
     } else {
       card.classList.remove('exploration-front');
-      card.textContent = '';
+      clearCardFaceVisual(card);
     }
   });
 }
@@ -1765,10 +1781,10 @@ function setOneRevealHand(playerId, active){
   miniCards.forEach((card, idx) => {
     if (active){
       card.classList.add('one-reveal-front');
-      card.textContent = String(cards[idx] ?? '');
+      setCardFace(card, cards[idx]);
     } else {
       card.classList.remove('one-reveal-front');
-      card.textContent = '';
+      clearCardFaceVisual(card);
     }
   });
 }
@@ -1789,10 +1805,10 @@ function setXRevealHand(playerId, active){
   miniCards.forEach((card, idx) => {
     if (active){
       card.classList.add('x-reveal-front');
-      card.textContent = String(cards[idx] ?? '');
+      setCardFace(card, cards[idx]);
     } else {
       card.classList.remove('x-reveal-front');
-      card.textContent = '';
+      clearCardFaceVisual(card);
     }
   });
 }
@@ -1810,16 +1826,18 @@ function setExplorationTieShake(playerId, active){
 function revealExplorationCardFront(el, value){
   if (!el) return;
   el.classList.add('exploration-front');
-  el.textContent = String(value ?? '');
+  setCardFace(el, value);
 }
 
-function clearExplorationPickedCard(){
+function clearExplorationPickedCard({ keepFront = false } = {}){
   const picked = playerCircle.querySelectorAll('.exploration-picked');
   if (!picked.length) return;
   picked.forEach((el) => {
+    if (!keepFront){
+      el.classList.remove('exploration-front');
+      clearCardFaceVisual(el);
+    }
     el.classList.remove('exploration-picked');
-    el.classList.remove('exploration-front');
-    el.textContent = '';
   });
 }
 
@@ -1907,9 +1925,7 @@ function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
       listeners.push({ el, handler });
     });
 
-    explorationSelectionTimer = setTimeout(() => {
-      finalize(null);
-    }, 12000);
+    explorationSelectionTimer = null;
   });
 }
 
@@ -1929,20 +1945,21 @@ async function animateExplorationCenterDrop(value){
   card.remove();
 }
 
-async function handleExplorationSelection(value){
+async function handleExplorationSelection(value, { keepFront = false } = {}){
   if (!value) return;
   if (String(value) === '5'){
     await animateGlobalFiveSlide();
-    clearExplorationPickedCard();
+    clearExplorationPickedCard({ keepFront });
     return;
   }
   await animateExplorationCenterDrop(value);
-  clearExplorationPickedCard();
+  clearExplorationPickedCard({ keepFront });
 }
 
 async function runExplorationPhaseSequence(eventId){
   if (explorationSequenceActive) return;
   explorationSequenceActive = true;
+  const revealedPlayers = new Set();
 
   try{
     await showExplorationFace();
@@ -1952,24 +1969,25 @@ async function runExplorationPhaseSequence(eventId){
     for (const group of groups){
       if (!group.players.length) continue;
 
-      group.players.forEach((pid) => setPlayerHandReveal(pid, true, { flip: pid === state.userId }));
+      group.players.forEach((pid) => {
+        setPlayerHandReveal(pid, true, { flip: pid === state.userId });
+        revealedPlayers.add(pid);
+      });
 
       if (group.players.length > 1){
         await sleep(140);
         group.players.forEach((pid) => setExplorationTieShake(pid, true));
         await sleep(1500);
         group.players.forEach((pid) => setExplorationTieShake(pid, false));
-        group.players.forEach((pid) => setPlayerHandReveal(pid, false));
         continue;
       }
 
       const pid = group.players[0];
       const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
-      await handleExplorationSelection(selection?.value);
-
-      setPlayerHandReveal(pid, false);
+      await handleExplorationSelection(selection?.value, { keepFront: true });
     }
   } finally {
+    revealedPlayers.forEach((pid) => setPlayerHandReveal(pid, false));
     cleanupExplorationSelection();
     explorationSequenceActive = false;
   }
@@ -3098,7 +3116,15 @@ async function onRuinPointerUp(e){
 function renderMyHand(){
   const myId = state.userId;
   const handData = state.hands[myId];
-  const cards = Array.isArray(handData?.cards) ? handData.cards : [];
+  let cards = Array.isArray(handData?.cards) ? handData.cards : [];
+  if (ui.effect2DropPending && cards.length === 0 && prevMyCardsSig){
+    try{
+      const prev = JSON.parse(prevMyCardsSig);
+      if (Array.isArray(prev) && prev.length){
+        cards = prev;
+      }
+    } catch {}
+  }
 
   const sig = JSON.stringify(cards);
 
@@ -4217,9 +4243,20 @@ async function resolveOneReveal(targetPlayerId, cardIndex, removedValue){
     value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
   }
   if (value != null){
-    const slotIndex = await placeCardIntoRuins(targetPlayerId, value, { skipEvent:true });
+    const slotsNow = getRuinsSlots();
+    const slotIndex = firstEmptyRuinSlotIndex(slotsNow);
     if (slotIndex !== null){
       await emitRuinMoveEvent(targetPlayerId, value, slotIndex, 'oneReveal');
+      await sleep(RUIN_MOVE_ANIM_MS);
+      const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+      await runTransaction(ruinsRef, (ruins) => {
+        const src = Array.isArray(ruins) ? [...ruins] : [];
+        const slots = new Array(6).fill(null);
+        for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+        if (slots[slotIndex]) return slots;
+        slots[slotIndex] = { v: String(value), by: targetPlayerId, at: Date.now() };
+        return slots;
+      }, { applyLocally:false });
     }
   }
 
@@ -4315,7 +4352,21 @@ async function resolveEffect4XReveal(targetPlayerId, cardIndex){
 
   const value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
   if (value != null){
-    await placeCardIntoRuins(targetPlayerId, value, { eventMode: 'xReveal' });
+    const slotsNow = getRuinsSlots();
+    const slotIndex = firstEmptyRuinSlotIndex(slotsNow);
+    if (slotIndex !== null){
+      await emitRuinMoveEvent(targetPlayerId, value, slotIndex, 'xReveal');
+      await sleep(RUIN_MOVE_ANIM_MS);
+      const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+      await runTransaction(ruinsRef, (ruins) => {
+        const src = Array.isArray(ruins) ? [...ruins] : [];
+        const slots = new Array(6).fill(null);
+        for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+        if (slots[slotIndex]) return slots;
+        slots[slotIndex] = { v: String(value), by: targetPlayerId, at: Date.now() };
+        return slots;
+      }, { applyLocally:false });
+    }
   }
 
   await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
@@ -4422,8 +4473,8 @@ async function handleEffect2Pick(cardIndex, cardEl){
     }
   }
 
-  // 自分：表で「選んだカードの位置→山札」アニメ
-  await animateReturnTopFromCardRectToDeck(fixedRect, pickedValue);
+  // 自分：移動アニメなし（他プレイヤーは裏アニメのみ）
+  // await animateReturnTopFromCardRectToDeck(fixedRect, pickedValue);
 
   // 他プレイヤー：裏で「その人→山札」アニメ（イベント）
   await emitReturnTopEvent(myId);
@@ -4691,6 +4742,13 @@ async function handleEffect6Drop(cardIndex){
     return;
   }
 
+  const localSlots = getRuinsSlots();
+  if (Number.isFinite(slotIndex) && slotIndex >= 0 && slotIndex < localSlots.length){
+    localSlots[slotIndex] = { v: String(removedValue), by: myId, at: Date.now() };
+    state.ruins = localSlots;
+    renderHands();
+  }
+
   await emitRuinMoveEvent(myId, removedValue, slotIndex);
   await sleep(RUIN_MOVE_ANIM_MS);
 
@@ -4817,6 +4875,13 @@ async function handleEffect7Drop(cardIndex){
   }, { applyLocally:false });
 
   if (!rem.committed || removedValue == null) return;
+
+  const localSlots = getRuinsSlots();
+  if (Number.isFinite(slotIndex) && slotIndex >= 0 && slotIndex < localSlots.length){
+    localSlots[slotIndex] = { v: String(removedValue), by: myId, at: Date.now() };
+    state.ruins = localSlots;
+    renderHands();
+  }
 
   await emitRuinMoveEvent(myId, removedValue, slotIndex);
   await sleep(RUIN_MOVE_ANIM_MS);
@@ -5213,7 +5278,7 @@ function renderRuinsArea(){
     const card = document.createElement('div');
     card.className = 'ruins-card';
     card.dataset.i = String(i);
-    card.dataset.value = String(item ?? '');
+    card.dataset.value = String(item?.v ?? item ?? '');
     card.textContent = '';
 
     if (mine7Picking){
