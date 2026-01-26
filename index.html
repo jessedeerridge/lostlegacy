@@ -1041,9 +1041,16 @@
     background:#000;
     color:#fff;
     border-color:rgba(255,255,255,.15);
+    width:auto;
+    max-width:calc(100% - 28px);
   }
   .gameover-pop.found5 .ttl{ display:none; }
-  .gameover-pop.found5 .txt{ white-space:nowrap; }
+  .gameover-pop.found5 .txt{
+    white-space:nowrap;
+    font-size:17px;
+    line-height:1.4;
+  }
+  .gameover-pop.found5{ pointer-events:none; }
   .gameover-box{
     background:#fff;
     border-radius:16px;
