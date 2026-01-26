@@ -6,7 +6,7 @@
 <title>ロストレガシー</title>
 <style>
   :root{
-    --hint-fill: rgba(219,234,254,.55);
+    --hint-fill: rgba(56,189,248,.7);
     --card-aspect: 2 / 3;
     --card-back-image: url('lrura.jpg');
     --ruin-scale-my: 0.64;
@@ -640,6 +640,10 @@
     opacity:0 !important;
     pointer-events:none !important;
   }
+  .ruins-card.drag-source-hidden{
+    opacity:0 !important;
+    pointer-events:none !important;
+  }
 
   .dialog-backdrop{
     position:fixed;inset:0;background:rgba(0,0,0,.35);
@@ -869,6 +873,27 @@
     background:#fff;
     box-shadow:0 18px 44px rgba(0,0,0,.38);
     transform: rotate(-2deg);
+    position:relative;
+    overflow:hidden;
+    --card-title-size:var(--card-large-title-size);
+    --card-reading-size:var(--card-large-reading-size);
+  }
+  .zoom-overlay{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,.35);
+    display:flex; align-items:center; justify-content:center;
+    z-index:890;
+  }
+  .zoom-overlay.hidden{ display:none; }
+  .zoom-card{
+    width:170px;
+    aspect-ratio:var(--card-aspect);
+    height:auto;
+    border-radius:16px;
+    border:2px solid rgba(255,255,255,.85);
+    background:#fff;
+    box-shadow:0 18px 44px rgba(0,0,0,.38);
+    transform: rotate(0deg);
     position:relative;
     overflow:hidden;
     --card-title-size:var(--card-large-title-size);
@@ -1376,6 +1401,9 @@
 <div id="peekOverlay" class="peek-overlay hidden">
   <div id="peekCard" class="peek-card">?</div>
 </div>
+<div id="zoomOverlay" class="zoom-overlay hidden" aria-hidden="true">
+  <div id="zoomCard" class="zoom-card"></div>
+</div>
 
 <!-- ★③/④：水色ポップ -->
 <div id="confirmPop" class="confirm-pop hidden">
@@ -1633,6 +1661,7 @@ function setCardFace(el, value){
   effectText.textContent = getCardEffectText(key);
   decorRight.appendChild(effectText);
   const isLargeFace = el.classList.contains('peek-card')
+    || el.classList.contains('zoom-card')
     || el.classList.contains('exploration-center-card')
     || el.classList.contains('global-x-card')
     || el.classList.contains('global-one-card')
@@ -1780,6 +1809,8 @@ const helpBody = document.getElementById('helpBody');
 
 const peekOverlay = document.getElementById('peekOverlay');
 const peekCardEl  = document.getElementById('peekCard');
+const zoomOverlay = document.getElementById('zoomOverlay');
+const zoomCardEl = document.getElementById('zoomCard');
 
 const confirmPop = document.getElementById('confirmPop');
 const confirmMsg = document.getElementById('confirmMsg');
@@ -1895,6 +1926,22 @@ function showPeekCard(value){
 }
 function hidePeekCard(){
   peekOverlay.classList.add('hidden');
+}
+
+function showZoomCard(value){
+  if (!zoomOverlay || !zoomCardEl) return;
+  setCardFace(zoomCardEl, value);
+  zoomOverlay.classList.remove('hidden');
+}
+function hideZoomCard(){
+  if (!zoomOverlay) return;
+  zoomOverlay.classList.add('hidden');
+}
+
+if (zoomOverlay){
+  zoomOverlay.addEventListener('click', (e) => {
+    if (e.target === zoomOverlay) hideZoomCard();
+  });
 }
 
 function showGameOver(text){
@@ -2424,6 +2471,12 @@ async function handleExplorationSelection(value, { keepFront = false, explorerId
   clearExplorationPickedCard({ keepFront });
 }
 
+function playerHandHasFive(playerId){
+  if (playerId === null || playerId === undefined) return false;
+  const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
+  return cards.some((v) => String(v) === '5');
+}
+
 async function runExplorationPhaseSequence(eventId){
   if (explorationSequenceActive) return;
   explorationSequenceActive = true;
@@ -2453,16 +2506,13 @@ async function runExplorationPhaseSequence(eventId){
       }
 
       const pid = group.players[0];
-      if (pid === state.userId){
-        const myCards = Array.isArray(state.hands?.[pid]?.cards) ? state.hands[pid].cards : [];
-        if (myCards.some((v) => String(v) === '5')){
-          await sleep(920);
-          await animateGlobalFiveSlide();
-          if (state.isHost && !state.gameOver){
-            await setGameOverFoundFive(pid);
-          }
-          return;
+      if (playerHandHasFive(pid)){
+        await sleep(920);
+        await animateGlobalFiveSlide();
+        if (state.isHost && !state.gameOver){
+          await setGameOverFoundFive(pid);
         }
+        return;
       }
 
       const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
@@ -3306,9 +3356,90 @@ function setHandDropActive(active){
   myHandRow.classList.toggle('effect7-pick-active', !!active);
 }
 
+const ZOOM_TAP_DISTANCE = 6;
+const zoomTapState = {
+  active: false,
+  pointerId: null,
+  startX: 0,
+  startY: 0,
+  target: null,
+  moved: false,
+};
+
+function isFaceUpMiniCard(cardEl){
+  return cardEl.classList.contains('exploration-front')
+    || cardEl.classList.contains('one-reveal-front')
+    || cardEl.classList.contains('x-reveal-front');
+}
+
+function isZoomableCardElement(cardEl){
+  if (!cardEl) return false;
+  if (!cardEl.dataset.value) return false;
+  if (cardEl.classList.contains('pickable')) return false;
+  if (peekOverlay && !peekOverlay.classList.contains('hidden')) return false;
+  if (cardEl.classList.contains('my-card')) return true;
+  if (cardEl.classList.contains('played-card')) return true;
+  if (cardEl.classList.contains('mini-card')) return isFaceUpMiniCard(cardEl);
+  return false;
+}
+
+function openZoomFromCard(cardEl){
+  if (!zoomOverlay || !zoomCardEl) return false;
+  if (!isZoomableCardElement(cardEl)) return false;
+  const value = cardEl.dataset.value;
+  if (!value) return false;
+  showZoomCard(value);
+  return true;
+}
+
+function clearZoomTapState(){
+  window.removeEventListener('pointermove', onZoomTapMove);
+  window.removeEventListener('pointerup', onZoomTapEnd);
+  window.removeEventListener('pointercancel', onZoomTapEnd);
+  zoomTapState.active = false;
+  zoomTapState.pointerId = null;
+  zoomTapState.target = null;
+  zoomTapState.moved = false;
+}
+
+function onZoomTapMove(e){
+  if (!zoomTapState.active || zoomTapState.pointerId !== e.pointerId) return;
+  if (zoomTapState.moved) return;
+  const dx = e.clientX - zoomTapState.startX;
+  const dy = e.clientY - zoomTapState.startY;
+  if (Math.hypot(dx, dy) > ZOOM_TAP_DISTANCE){
+    zoomTapState.moved = true;
+  }
+}
+
+function onZoomTapEnd(e){
+  if (!zoomTapState.active || zoomTapState.pointerId !== e.pointerId) return;
+  const target = zoomTapState.target;
+  const moved = zoomTapState.moved;
+  clearZoomTapState();
+  if (moved) return;
+  if (drag.active || e2drag.active || e6drag.active || e7drag.active || e7pickDrag.active || e8drag.active) return;
+  openZoomFromCard(target);
+}
+
+function startZoomTap(e, cardEl){
+  if (zoomTapState.active) return;
+  if (!isZoomableCardElement(cardEl)) return;
+  zoomTapState.active = true;
+  zoomTapState.pointerId = e.pointerId;
+  zoomTapState.startX = e.clientX;
+  zoomTapState.startY = e.clientY;
+  zoomTapState.target = cardEl;
+  zoomTapState.moved = false;
+  window.addEventListener('pointermove', onZoomTapMove, { passive:true });
+  window.addEventListener('pointerup', onZoomTapEnd, { passive:false });
+  window.addEventListener('pointercancel', onZoomTapEnd, { passive:false });
+}
+
 /* ====== 手札カード pointer handlers ====== */
 function onCardPointerDown(e){
   const cardEl = e.currentTarget;
+  startZoomTap(e, cardEl);
 
   // ★ゲーム終了/脱落/③④選択中はドラッグ禁止
   if (state.gameOver) return;
@@ -6278,6 +6409,8 @@ function renderPlayerCircle(players){
           setCardFace(card, handCards[i2]);
         }
 
+        card.addEventListener('pointerdown', (ev) => startZoomTap(ev, card));
+
         // ★③/④：使用者が選択中なら pickable
         if (pickMode && !isElim){
           card.classList.add('pickable');
@@ -6363,6 +6496,8 @@ function renderPlayerCircle(players){
         } else {
           c.style.transform = `rotate(0deg)`;
         }
+
+        c.addEventListener('pointerdown', (ev) => startZoomTap(ev, c));
 
         row.appendChild(c);
       });
