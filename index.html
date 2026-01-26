@@ -7,6 +7,7 @@
 <style>
   :root{
     --hint-fill: rgba(219,234,254,.55);
+    --card-aspect: 2 / 3;
   }
   html, body{height:100%; overflow:hidden;}
   body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#fff;color:#111;}
@@ -341,14 +342,90 @@
     z-index:12;
   }
   .played-card{
-    width:36px;height:54px;border-radius:8px;
+    width:42px;
+    aspect-ratio:var(--card-aspect);
+    height:auto;
+    border-radius:8px;
     border:1px solid rgba(0,0,0,.18);
     background:rgba(255,255,255,.96);
     box-shadow:0 8px 18px rgba(0,0,0,.16);
-    display:flex;align-items:center;justify-content:center;
-    font-size:16px;font-weight:900;
     transform-origin:center center;
     will-change:transform;
+    position:relative;
+    overflow:hidden;
+    --card-title-size:8px;
+    --card-reading-size:6px;
+  }
+
+  .card-face{
+    position:absolute;
+    inset:0;
+    border-radius:inherit;
+    background-color:#fff;
+    background-image:var(--card-image);
+    background-size:cover;
+    background-position:center;
+    background-repeat:no-repeat;
+    display:block;
+    pointer-events:none;
+  }
+  .card-overlay{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+  }
+  .card-title{
+    position:absolute;
+    left:1%;
+    top:1%;
+    bottom:4%;
+    writing-mode:vertical-rl;
+    text-orientation:upright;
+    white-space:pre-line;
+    font-weight:800;
+    font-size:var(--card-title-size, 12px);
+    color:#111;
+    text-shadow:0 1px 2px rgba(255,255,255,.75);
+    letter-spacing:0.08em;
+  }
+  .card-title-number{
+    font-size:calc(var(--card-title-size, 12px) + 2px);
+  }
+  .card-title-number.is-x{
+    font-size:calc(var(--card-title-size, 12px) + 6px);
+  }
+  .card-title-name{
+    margin-block-start:0.25em;
+  }
+
+  .card-title.is-five,
+  .card-title.is-five .card-title-number,
+  .card-title.is-five .card-title-name{
+    color:#f97316;
+  }
+  .card-decor-left{
+    position:absolute;
+    left:4%;
+    bottom:4%;
+    display:flex;
+    gap:1px;
+  }
+  .card-decor-left span{
+    width:2px;
+    height:5px;
+    border-radius:3px;
+    background:rgba(255,255,255,.75);
+    border:1px solid rgba(0,0,0,.18);
+  }
+  .card-decor-right{
+    position:absolute;
+    top:4%;
+    right:4%;
+    width:65%;
+    height:28%;
+    border-radius:6px;
+    border:1px dashed rgba(0,0,0,.35);
+    background:rgba(255,255,255,.1);
   }
 
   .my-hand-wrapper{margin-top:16px;text-align:center;}
@@ -367,16 +444,23 @@
     justify-content:center;
     gap:8px;
     margin-top:0;
-    min-height:90px;
+    min-height:100px;
   }
 
   .my-card{
-    width:60px;height:90px;border-radius:8px;border:1px solid #ddd;background:#fff;
-    display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:600;
+    width:66px;
+    aspect-ratio:var(--card-aspect);
+    height:auto;
+    border-radius:10px;
+    border:1px solid rgba(0,0,0,.18);
+    background:#fff;
     box-shadow:0 4px 12px rgba(0,0,0,.15);
     user-select:none;
     touch-action:none;
     position:relative;
+    overflow:hidden;
+    --card-title-size:12px;
+    --card-reading-size:9px;
   }
 
   .my-card.selected{
@@ -452,16 +536,19 @@
 
   .drag-ghost{
     position:fixed;
-    width:60px; height:90px;
-    border-radius:8px;
+    width:66px;
+    aspect-ratio:var(--card-aspect);
+    height:auto;
+    border-radius:10px;
     border:1px solid rgba(0,0,0,.2);
     background:#fff;
     box-shadow:0 18px 40px rgba(0,0,0,.28);
-    display:flex;align-items:center;justify-content:center;
-    font-size:24px;font-weight:700;
     pointer-events:none;
     z-index:9999;
     transform:translate(-50%,-50%);
+    overflow:hidden;
+    --card-title-size:12px;
+    --card-reading-size:9px;
   }
 
   .my-card.drag-source-hidden{
@@ -656,14 +743,18 @@
   }
   .peek-overlay.hidden{ display:none; }
   .peek-card{
-    width:140px; height:210px;
+    width:150px;
+    aspect-ratio:var(--card-aspect);
+    height:auto;
     border-radius:14px;
     border:2px solid rgba(255,255,255,.75);
     background:#fff;
     box-shadow:0 18px 44px rgba(0,0,0,.38);
-    display:flex; align-items:center; justify-content:center;
-    font-size:54px; font-weight:900;
     transform: rotate(-2deg);
+    position:relative;
+    overflow:hidden;
+    --card-title-size:20px;
+    --card-reading-size:14px;
   }
 
   /* 画面下：水色ポップ（閉じてもいいですか／はい） */
@@ -696,17 +787,20 @@
     top:50%;
     left:-30%;
     transform:translate(-50%,-50%);
-    width:150px;
-    height:225px;
+    width:160px;
+    aspect-ratio:var(--card-aspect);
+    height:auto;
     border-radius:14px;
     background:#fff;
     border:2px solid rgba(0,0,0,.12);
     box-shadow:0 18px 44px rgba(0,0,0,.30);
     z-index:980;
-    display:flex;align-items:center;justify-content:center;
-    font-size:58px;font-weight:900;
     will-change:transform,left,opacity;
     pointer-events:none;
+    position:relative;
+    overflow:hidden;
+    --card-title-size:22px;
+    --card-reading-size:16px;
   }
 
   /* ===== 全員：✕拡大 ===== */
@@ -719,14 +813,20 @@
   }
   .global-x-backdrop.hidden{ display:none; }
   .global-x-card{
-    width:160px;height:240px;border-radius:16px;
-    background:#fff;border:2px solid rgba(255,255,255,.78);
+    width:170px;
+    aspect-ratio:var(--card-aspect);
+    height:auto;
+    border-radius:16px;
+    background:#fff;
+    border:2px solid rgba(255,255,255,.78);
     box-shadow:0 22px 56px rgba(0,0,0,.42);
-    display:flex;align-items:center;justify-content:center;
-    font-size:64px;font-weight:1000;
     opacity:0;
     transform:translateY(38vh) scale(0.95);
     transform-origin:center bottom;
+    position:relative;
+    overflow:hidden;
+    --card-title-size:24px;
+    --card-reading-size:16px;
   }
   @keyframes xShake{
     0%{ transform:translateY(0) scale(1.06) rotate(0deg); }
@@ -763,12 +863,18 @@
     100%{ transform:scale(1); opacity:.95; }
   }
   .global-one-card{
-    width:160px;height:240px;border-radius:16px;
-    background:#fff;border:2px solid rgba(255,255,255,.8);
+    width:170px;
+    aspect-ratio:var(--card-aspect);
+    height:auto;
+    border-radius:16px;
+    background:#fff;
+    border:2px solid rgba(255,255,255,.8);
     box-shadow:0 22px 56px rgba(0,0,0,.42);
-    display:flex;align-items:center;justify-content:center;
-    font-size:64px;font-weight:1000;
     animation: onePulse 1500ms ease-in-out 1;
+    position:relative;
+    overflow:hidden;
+    --card-title-size:24px;
+    --card-reading-size:16px;
   }
 
   .player-fan.one-reveal{
@@ -1092,6 +1198,80 @@ const RESHUFFLE_ANIM_MS = 980;
 const RUIN_MOVE_ANIM_MS = 760;
 const RUIN_TAKE_ANIM_MS = 760;
 
+const CARD_META = {
+  "1": { name: "宿命の少女", reading: "しゅくめい\u3000しょうじょ" },
+  "2": { name: "将軍", reading: "しょうぐん" },
+  "3": { name: "女盗賊", reading: "おんなとうぞく" },
+  "4": { name: "剣士", reading: "けんせい" },
+  "5": { name: "星を渡る船", reading: "ロストレガシー" },
+  "6": { name: "古地図", reading: "ふるちず" },
+  "7": { name: "調査", reading: "ちょうさ" },
+  "8": { name: "襲撃", reading: "しゅうげき" },
+  "x": { name: "待ち伏せ", reading: "ま\u3000ぶ" },
+};
+
+function normalizeCardValue(value){
+  if (value === null || value === undefined) return '';
+  const v = String(value);
+  if (v === '✕' || v === '×') return 'x';
+  return v;
+}
+
+function getCardMeta(value){
+  const key = normalizeCardValue(value);
+  return CARD_META[key] || { name: '', reading: '' };
+}
+
+function setCardFace(el, value){
+  if (!el) return;
+  const key = normalizeCardValue(value);
+  el.dataset.value = key;
+  el.innerHTML = '';
+  if (!key){
+    el.style.removeProperty('--card-image');
+    return;
+  }
+
+  const meta = getCardMeta(key);
+  const displayNumber = key === 'x' ? '×' : key;
+  el.style.setProperty('--card-image', `url('lr${key}.jpg')`);
+
+  const face = document.createElement('div');
+  face.className = 'card-face';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'card-overlay';
+
+  const title = document.createElement('div');
+  title.className = 'card-title';
+  if (key === '5') title.classList.add('is-five');
+  const numberEl = document.createElement('span');
+  numberEl.className = 'card-title-number';
+  numberEl.textContent = displayNumber;
+  if (key === 'x') numberEl.classList.add('is-x');
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'card-title-name';
+  nameEl.textContent = meta.name;
+
+  title.append(numberEl, nameEl);
+
+
+
+  const decorLeft = document.createElement('div');
+  decorLeft.className = 'card-decor-left';
+  decorLeft.innerHTML = '<span></span><span></span><span></span>';
+
+  const decorRight = document.createElement('div');
+  decorRight.className = 'card-decor-right';
+
+  overlay.appendChild(title);
+  overlay.appendChild(decorLeft);
+  overlay.appendChild(decorRight);
+  face.appendChild(overlay);
+  el.appendChild(face);
+}
+
 /* ★遺跡を下げた分（CSSと合わせる） */
 const RUINS_SHIFT_Y = 14;
 
@@ -1265,7 +1445,7 @@ function hideConfirmPop(){
 }
 
 function showPeekCard(value){
-  peekCardEl.textContent = String(value ?? '');
+  setCardFace(peekCardEl, value);
   peekOverlay.classList.remove('hidden');
 }
 function hidePeekCard(){
@@ -2280,7 +2460,7 @@ function onCardPointerDown(e){
 
     const ghost = document.createElement('div');
     ghost.className = 'drag-ghost';
-    ghost.textContent = cardEl.textContent || '';
+    setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
     document.body.appendChild(ghost);
     e2drag.ghostEl = ghost;
 
@@ -2315,7 +2495,7 @@ function onCardPointerDown(e){
 
     const ghost = document.createElement('div');
     ghost.className = 'drag-ghost';
-    ghost.textContent = cardEl.textContent || '';
+    setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
     document.body.appendChild(ghost);
     e7drag.ghostEl = ghost;
 
@@ -2349,7 +2529,7 @@ function onCardPointerDown(e){
 
     const ghost = document.createElement('div');
     ghost.className = 'drag-ghost';
-    ghost.textContent = cardEl.textContent || '';
+    setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
     document.body.appendChild(ghost);
     e8drag.ghostEl = ghost;
 
@@ -2384,7 +2564,7 @@ function onCardPointerDown(e){
 
     const ghost = document.createElement('div');
     ghost.className = 'drag-ghost';
-    ghost.textContent = cardEl.textContent || '';
+    setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
     document.body.appendChild(ghost);
     e6drag.ghostEl = ghost;
 
@@ -2399,7 +2579,7 @@ function onCardPointerDown(e){
   }
 
   if (!state.isPlayable) return;
-  if ((cardEl.textContent || '').trim() === '5') return;
+  if ((cardEl.dataset.value || '').trim() === '5') return;
 
   const idx = Number(cardEl.dataset.index);
   if (!Number.isFinite(idx)) return;
@@ -2413,7 +2593,7 @@ function onCardPointerDown(e){
 
   const ghost = document.createElement('div');
   ghost.className = 'drag-ghost';
-  ghost.textContent = cardEl.textContent || '';
+  setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
   document.body.appendChild(ghost);
   drag.ghostEl = ghost;
 
@@ -2593,7 +2773,7 @@ function onRuinPointerDown(e){
 
   const ghost = document.createElement('div');
   ghost.className = 'drag-ghost';
-  ghost.textContent = cardEl.textContent || '';
+  setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
   document.body.appendChild(ghost);
   e7pickDrag.ghostEl = ghost;
 
@@ -2655,7 +2835,7 @@ function renderMyHand(){
   cards.forEach((v, i) => {
     const card = document.createElement('div');
     card.className = 'my-card';
-    card.textContent = v;
+    setCardFace(card, v);
     card.dataset.index = String(i);
     if (String(v) === '5') card.classList.add('no-play-pulse');
 
@@ -3214,7 +3394,7 @@ async function animateMoveFromPlayerToMyHand(fromPlayerId, cardValue){
 async function animateGlobalFiveSlide(){
   const card = document.createElement('div');
   card.className = 'global-slide-card';
-  card.textContent = '5';
+  setCardFace(card, '5');
   document.body.appendChild(card);
 
   await sleep(0);
@@ -3250,6 +3430,8 @@ async function animateGlobalXReveal(mode = 'effect38'){
     globalXBackdrop.classList.add('hidden');
     return;
   }
+
+  setCardFace(card, 'x');
 
   card.classList.remove('x-shake', 'x-fall-back');
   card.style.transition = 'none';
@@ -3293,6 +3475,7 @@ async function animateGlobalOneReveal(targetPlayerId){
   if (old){
     const fresh = old.cloneNode(true);
     old.parentNode.replaceChild(fresh, old);
+    setCardFace(fresh, '1');
   }
 
   await sleep(1500);
@@ -5010,7 +5193,7 @@ function renderPlayerCircle(players){
       slice.forEach(v => {
         const c = document.createElement('div');
         c.className = 'played-card';
-        c.textContent = v;
+        setCardFace(c, v);
 
         if (!parallel){
           c.style.transform = `rotate(${cardRotate}deg)`;
