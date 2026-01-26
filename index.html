@@ -707,16 +707,43 @@
   }
   .help-pop-title{font-weight:800;font-size:14px;}
   .help-pop-body{padding:12px;overflow:auto;max-height:calc(70vh - 48px);}
-  .role-row{display:flex;gap:12px;align-items:flex-start;padding:10px 0;}
-  .role-card{
-    width:72px;height:108px;border-radius:10px;border:1px solid #ddd;background:#f8f8f8;
-    box-shadow:0 6px 16px rgba(0,0,0,.10);
-    flex:0 0 auto;display:flex;align-items:center;justify-content:center;
-    font-size:12px;font-weight:700;color:#444;
+  .help-set{margin-bottom:14px;}
+  .help-set-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .help-set-toggle{
+    border:1px solid #111;
+    color:#111;
+    font-weight:800;
+    font-size:12px;
+    padding:4px 10px;
+    border-radius:999px;
+    background:#fff;
+    cursor:pointer;
   }
-  .role-desc{flex:1 1 auto;}
-  .role-desc .name{font-weight:900;margin-bottom:4px;}
-  .role-desc .text{font-size:13px;line-height:1.55;color:#222;white-space:pre-wrap;}
+  .help-set-toggle.is-disabled{
+    opacity:.5;
+    border-style:dashed;
+  }
+  .help-card-grid{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    transition:opacity .2s ease, filter .2s ease;
+  }
+  .help-card-grid.is-disabled{
+    opacity:.35;
+    filter:grayscale(1);
+  }
+  .help-card-row{
+    display:flex;
+    justify-content:flex-start;
+    gap:8px;
+    flex-wrap:nowrap;
+  }
+  .help-card{
+    width:calc(66px * 1.2);
+    aspect-ratio:var(--card-aspect);
+    height:auto;
+  }
 
   /* 遺跡エリア（2x3）：画面中心(=playerCircle中心)に固定。center-areaを動かしてもここは動かさない */
   .ruins-area{
@@ -1775,32 +1802,66 @@ function getEffectArrowOverlay(){
   return effectArrowOverlayEl;
 }
 
-const ROLE_HELP = [
-  { name: "（1）", text: "プレイしても何も起きない。③/④/⑧で見られた場合、③/④/⑧効果を消して、全員に1を拡大表示→この1を空いている遺跡へ順番に自動配置→所有者は脱落（以後手番スキップ＆ドローなし）。" },
-  { name: "（2）", text: "追加で1枚ドロー（全員に裏で移動可視）→ 手札全て大小 → 1枚選んで青枠 → 山札の一番上へ戻す（全員に裏で移動可視）" },
-  { name: "（3）", text: "他プレイヤーの扇カードが大小アニメ。1枚選ぶと、使用者以外の画面では使用者→対象へ点線矢印。使用者だけ選んだカードを拡大表示。下に水色ポップ「閉じてもいいですか」→はいで次のターン。※見たカードが5なら全員で5演出→ゲーム終了（全員停止）。" },
-  { name: "（4）", text: "他プレイヤーの扇カードが大小アニメ。1枚選ぶと、使用者以外の画面では使用者→対象へ点線矢印。使用者だけ拡大表示。下にポップ→はいで次ターン。※見たカードが✕なら全員で✕拡大→倒れる演出→1.5秒後に✕所有者のミニ手札が表で拡大→元に戻ってから✕のカードが遺跡へ裏向き配置→✕所有者は脱落（以後手番スキップ＆ドローなし）。" },
-  { name: "（5）", text: "（効果説明をここに）" },
-  { name: "（6）", text: "追加で1枚ドロー → 手札大小 → 1枚をドラッグして遺跡(2x3順番)へ配置" },
-  { name: "（7）", text: "遺跡カード全て大小 → 1枚選んで手札へ → 手札大小＆ドラッグ → 空いた遺跡スロットへ配置" },
-  { name: "（8）", text: "他プレイヤーの扇カードが大小アニメ → 1枚選ぶと点線矢印表示 → そのカードが自分の手札へ移動 → 自分の手札が大小＆ドラッグ可 → さっき選んだ相手にドラッグで渡す（他プレイヤーには裏向き移動表示）" },
-  { name: "（x）", text: "プレイしても何も起きない。③/⑧で見られた場合、全員に✕を拡大表示→✕カードを所有者の捨て札へ。③/⑧プレイ者の手札を✕所有者へ移動し、③/⑧プレイ者は脱落（以後手番スキップ＆ドローなし）。" },
+const DECK_SETS = [
+  {
+    id: 'starship',
+    name: '星を渡る船',
+    cards: [1,2,3,4,5,6,6,7,8,'x','x','x'],
+    helpRows: [
+      [1,2,3,4,5],
+      [6,7,8,'x'],
+    ],
+  },
 ];
+const deckSetState = Object.fromEntries(DECK_SETS.map((set) => [set.id, true]));
 
 function renderHelpList(){
   helpBody.innerHTML = '';
-  ROLE_HELP.forEach((r, idx) => {
-    const row = document.createElement('div');
-    row.className = 'role-row';
-    const card = document.createElement('div');
-    card.className = 'role-card';
-    card.textContent = `CARD ${idx+1}`;
-    const desc = document.createElement('div');
-    desc.className = 'role-desc';
-    desc.innerHTML = `<div class="name">${r.name}</div><div class="text">${r.text}</div>`;
-    row.appendChild(card);
-    row.appendChild(desc);
-    helpBody.appendChild(row);
+  DECK_SETS.forEach((set) => {
+    const section = document.createElement('div');
+    section.className = 'help-set';
+
+    const header = document.createElement('div');
+    header.className = 'help-set-header';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'help-set-toggle';
+    toggle.textContent = set.name;
+
+    const enabled = !!deckSetState[set.id];
+    toggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    if (!enabled) toggle.classList.add('is-disabled');
+
+    header.appendChild(toggle);
+    section.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'help-card-grid';
+    if (!enabled) grid.classList.add('is-disabled');
+
+    set.helpRows.forEach((rowCards) => {
+      const row = document.createElement('div');
+      row.className = 'help-card-row';
+      rowCards.forEach((value) => {
+        const card = document.createElement('div');
+        card.className = 'my-card help-card';
+        setCardFace(card, value);
+        row.appendChild(card);
+      });
+      grid.appendChild(row);
+    });
+
+    toggle.addEventListener('click', () => {
+      deckSetState[set.id] = !deckSetState[set.id];
+      const isEnabled = deckSetState[set.id];
+      toggle.setAttribute('aria-pressed', isEnabled ? 'true' : 'false');
+      toggle.classList.toggle('is-disabled', !isEnabled);
+      grid.classList.toggle('is-disabled', !isEnabled);
+    });
+
+    section.appendChild(grid);
+    helpBody.appendChild(section);
   });
 }
 function openHelp(){ renderHelpList(); helpBackdrop.classList.remove('hidden'); }
@@ -6321,10 +6382,7 @@ function renderPlayerCircle(players){
 /* ==== 以降：配布/ホストUI等 ==== */
 
 function buildDeckForPlayers(playerCount){
-  return [
-    1,2,3,4,5,6,6,
-   7,8,"x","x","x"
-  ];
+  return DECK_SETS.flatMap((set) => (deckSetState[set.id] ? set.cards : []));
 }
 
 function toDisplayValue(v){ return String(v); }
