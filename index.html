@@ -414,8 +414,8 @@
     width:2px;
     height:5px;
     border-radius:3px;
-    background:rgba(255,255,255,.75);
-    border:1px solid rgba(0,0,0,.18);
+    background:#111;
+    border:1px solid #111;
   }
   .card-decor-right{
     position:absolute;
@@ -461,6 +461,10 @@
     overflow:hidden;
     --card-title-size:12px;
     --card-reading-size:9px;
+  }
+  .my-card .card-title{
+    top:4%;
+    bottom:auto;
   }
 
   .my-card.selected{
@@ -1222,6 +1226,26 @@ function getCardMeta(value){
   return CARD_META[key] || { name: '', reading: '' };
 }
 
+function getCardDecorCount(value){
+  const key = normalizeCardValue(value);
+  switch (key){
+    case '6':
+      return 2;
+    case '7':
+    case '8':
+    case 'x':
+      return 3;
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 function setCardFace(el, value){
   if (!el) return;
   const key = normalizeCardValue(value);
@@ -1260,7 +1284,11 @@ function setCardFace(el, value){
 
   const decorLeft = document.createElement('div');
   decorLeft.className = 'card-decor-left';
-  decorLeft.innerHTML = '<span></span><span></span><span></span>';
+  const decorCount = getCardDecorCount(key);
+  for (let i = 0; i < decorCount; i++){
+    const bar = document.createElement('span');
+    decorLeft.appendChild(bar);
+  }
 
   const decorRight = document.createElement('div');
   decorRight.className = 'card-decor-right';
