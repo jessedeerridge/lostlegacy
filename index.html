@@ -376,9 +376,9 @@
   }
   .card-title{
     position:absolute;
-    left:6%;
-    top:7%;
-    bottom:7%;
+    left:4%;
+    top:4%;
+    bottom:4%;
     writing-mode:vertical-rl;
     text-orientation:upright;
     white-space:pre-line;
@@ -391,14 +391,17 @@
   .card-title-number{
     font-size:calc(var(--card-title-size, 12px) + 2px);
   }
+  .card-title-number.is-x{
+    font-size:calc(var(--card-title-size, 12px) + 2px);
+  }
   .card-title-name{
     margin-block-start:0.25em;
   }
   .card-reading{
     position:absolute;
-    left:22%;
-    top:10%;
-    bottom:10%;
+    left:20%;
+    top:4%;
+    bottom:4%;
     writing-mode:vertical-rl;
     text-orientation:upright;
     white-space:pre-line;
@@ -407,6 +410,35 @@
     opacity:.78;
     text-shadow:0 1px 2px rgba(255,255,255,.75);
     letter-spacing:0.06em;
+  }
+  .card-title.is-five,
+  .card-title.is-five .card-title-number,
+  .card-title.is-five .card-title-name{
+    color:#f97316;
+  }
+  .card-decor-left{
+    position:absolute;
+    left:4%;
+    bottom:4%;
+    display:flex;
+    gap:4px;
+  }
+  .card-decor-left span{
+    width:6px;
+    height:16px;
+    border-radius:3px;
+    background:rgba(255,255,255,.75);
+    border:1px solid rgba(0,0,0,.18);
+  }
+  .card-decor-right{
+    position:absolute;
+    top:4%;
+    right:4%;
+    width:38%;
+    height:14%;
+    border-radius:6px;
+    border:1px dashed rgba(0,0,0,.35);
+    background:rgba(255,255,255,.1);
   }
 
   .my-hand-wrapper{margin-top:16px;text-align:center;}
@@ -1225,9 +1257,11 @@ function setCardFace(el, value){
 
   const title = document.createElement('div');
   title.className = 'card-title';
+  if (key === '5') title.classList.add('is-five');
   const numberEl = document.createElement('span');
   numberEl.className = 'card-title-number';
   numberEl.textContent = displayNumber;
+  if (key === 'x') numberEl.classList.add('is-x');
 
   const nameEl = document.createElement('span');
   nameEl.className = 'card-title-name';
@@ -1239,8 +1273,17 @@ function setCardFace(el, value){
   reading.className = 'card-reading';
   reading.textContent = meta.reading;
 
+  const decorLeft = document.createElement('div');
+  decorLeft.className = 'card-decor-left';
+  decorLeft.innerHTML = '<span></span><span></span><span></span>';
+
+  const decorRight = document.createElement('div');
+  decorRight.className = 'card-decor-right';
+
   overlay.appendChild(title);
   overlay.appendChild(reading);
+  overlay.appendChild(decorLeft);
+  overlay.appendChild(decorRight);
   face.appendChild(overlay);
   el.appendChild(face);
 }
