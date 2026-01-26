@@ -349,6 +349,8 @@
     transform-origin:bottom center;
     box-shadow:0 2px 6px rgba(0,0,0,.15);
     pointer-events:none;
+    --card-title-size:6px;
+    --card-reading-size:4px;
   }
 
   /* ★③/④：扇カードが大小アニメ＆クリック可（使用者のみ） */
@@ -759,6 +761,8 @@
     pointer-events:none;
     user-select:none;
     color:transparent;
+    --card-title-size:7px;
+    --card-reading-size:5px;
   }
 
   @keyframes ruinsPulse {
@@ -1469,6 +1473,12 @@ function setCardFace(el, value){
   el.appendChild(face);
 }
 
+function clearCardFaceVisual(el){
+  if (!el) return;
+  el.innerHTML = '';
+  el.style.removeProperty('--card-image');
+}
+
 function createFaceFlyer(cardValue){
   const flyer = document.createElement('div');
   flyer.className = 'front-flyer face-flyer';
@@ -1735,7 +1745,7 @@ function setPlayerHandReveal(playerId, active, { flip = false } = {}){
   miniCards.forEach((card, idx) => {
     if (active){
       card.classList.add('exploration-front');
-      card.textContent = String(cards[idx] ?? '');
+      setCardFace(card, cards[idx]);
       if (wasActive){
         card.classList.add('exploration-reopen');
         card.addEventListener('animationend', () => {
@@ -1744,7 +1754,7 @@ function setPlayerHandReveal(playerId, active, { flip = false } = {}){
       }
     } else {
       card.classList.remove('exploration-front');
-      card.textContent = '';
+      clearCardFaceVisual(card);
     }
   });
 }
@@ -1789,10 +1799,10 @@ function setXRevealHand(playerId, active){
   miniCards.forEach((card, idx) => {
     if (active){
       card.classList.add('x-reveal-front');
-      card.textContent = String(cards[idx] ?? '');
+      setCardFace(card, cards[idx]);
     } else {
       card.classList.remove('x-reveal-front');
-      card.textContent = '';
+      clearCardFaceVisual(card);
     }
   });
 }
@@ -1810,7 +1820,7 @@ function setExplorationTieShake(playerId, active){
 function revealExplorationCardFront(el, value){
   if (!el) return;
   el.classList.add('exploration-front');
-  el.textContent = String(value ?? '');
+  setCardFace(el, value);
 }
 
 function clearExplorationPickedCard(){
@@ -1819,7 +1829,7 @@ function clearExplorationPickedCard(){
   picked.forEach((el) => {
     el.classList.remove('exploration-picked');
     el.classList.remove('exploration-front');
-    el.textContent = '';
+    clearCardFaceVisual(el);
   });
 }
 
@@ -1907,9 +1917,7 @@ function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
       listeners.push({ el, handler });
     });
 
-    explorationSelectionTimer = setTimeout(() => {
-      finalize(null);
-    }, 12000);
+    explorationSelectionTimer = null;
   });
 }
 
@@ -4315,7 +4323,21 @@ async function resolveEffect4XReveal(targetPlayerId, cardIndex){
 
   const value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
   if (value != null){
-    await placeCardIntoRuins(targetPlayerId, value, { eventMode: 'xReveal' });
+    const slotsNow = getRuinsSlots();
+    const slotIndex = firstEmptyRuinSlotIndex(slotsNow);
+    if (slotIndex !== null){
+      await emitRuinMoveEvent(targetPlayerId, value, slotIndex, 'xReveal');
+      await sleep(RUIN_MOVE_ANIM_MS);
+      const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+      await runTransaction(ruinsRef, (ruins) => {
+        const src = Array.isArray(ruins) ? [...ruins] : [];
+        const slots = new Array(6).fill(null);
+        for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+        if (slots[slotIndex]) return slots;
+        slots[slotIndex] = { v: String(value), by: targetPlayerId, at: Date.now() };
+        return slots;
+      }, { applyLocally:false });
+    }
   }
 
   await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
