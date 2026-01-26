@@ -866,8 +866,8 @@
   .global-slide-card{
     position:fixed;
     top:50%;
-    left:-30%;
-    transform:translate(-50%,-50%);
+    left:50%;
+    transform:translate3d(-50%,-50%,0) scale(1);
     width:160px;
     aspect-ratio:var(--card-aspect);
     height:auto;
@@ -878,10 +878,28 @@
     z-index:980;
     will-change:transform,left,opacity;
     pointer-events:none;
-    position:relative;
     overflow:hidden;
     --card-title-size:22px;
     --card-reading-size:16px;
+    opacity:0;
+  }
+  @keyframes fiveSlideMotion{
+    0%{
+      transform:translate3d(calc(-50% - 120vw), -50%, 0) scale(0.72);
+      opacity:0;
+    }
+    25%{
+      transform:translate3d(-50%, -50%, 0) scale(1.12);
+      opacity:1;
+    }
+    55%{
+      transform:translate3d(-50%, -50%, 0) scale(1.08);
+      opacity:1;
+    }
+    100%{
+      transform:translate3d(calc(-50% + 120vw), -50%, 0) scale(0.9);
+      opacity:0;
+    }
   }
 
   /* ===== 全員：✕拡大 ===== */
@@ -2140,7 +2158,7 @@ async function animateExplorationCenterDrop(value){
 async function handleExplorationSelection(value, { keepFront = false, explorerId = null } = {}){
   if (!value) return;
   if (String(value) === '5'){
-    await animateGlobalFiveSlide();
+    await triggerFiveSlideSequence(explorerId);
     if (state.isHost && !state.gameOver){
       await setGameOverFoundFive(explorerId);
     }
@@ -4011,35 +4029,40 @@ async function animateMoveFromPlayerToMyHand(fromPlayerId, cardValue){
   flyer.remove();
 }
 
-/* ★全員：5が左→中央へ流れて拡大→右へ流れる */
+/* ★全員：5が左→中央へ流れて拡大→右へ流れる（新規書き直し） */
+let fiveSlideInFlight = null;
 async function animateGlobalFiveSlide(){
-  const card = document.createElement('div');
-  card.className = 'global-slide-card';
-  setCardFace(card, '5');
-  document.body.appendChild(card);
+  if (fiveSlideInFlight) return fiveSlideInFlight;
+  fiveSlideInFlight = new Promise((resolve) => {
+    document.querySelectorAll('.global-slide-card.five-slide-anim').forEach((el) => el.remove());
 
-  await sleep(0);
-  card.style.transition = 'none';
-  card.style.opacity = '1';
-  card.style.left = '-30%';
-  card.style.transform = 'translate(-50%,-50%) scale(0.75)';
-  void card.offsetWidth;
-  card.style.transition = `left ${FIVE_SLIDE_IN_MS}ms cubic-bezier(.22,.84,.44,1), transform ${FIVE_SLIDE_IN_MS}ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease`;
-  card.style.left = '50%';
-  card.style.transform = 'translate(-50%,-50%) scale(1.12)';
-  await sleep(FIVE_SLIDE_IN_MS + 40);
+    const card = document.createElement('div');
+    card.className = 'global-slide-card five-slide-anim';
+    setCardFace(card, '5');
+    card.style.animation = `fiveSlideMotion ${FIVE_SLIDE_TOTAL_MS}ms cubic-bezier(.22,.84,.44,1) forwards`;
+    document.body.appendChild(card);
 
-  card.style.transition = 'transform 120ms ease';
-  card.style.transform = 'translate(-50%,-50%) scale(1.08)';
-  await sleep(120);
-  await sleep(FIVE_SLIDE_HOLD_MS);
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      card.remove();
+      fiveSlideInFlight = null;
+      resolve();
+    };
+    card.addEventListener('animationend', done, { once:true });
+    setTimeout(done, FIVE_SLIDE_TOTAL_MS + 200);
+  });
+  return fiveSlideInFlight;
+}
 
-  card.style.transition = `left ${FIVE_SLIDE_OUT_MS}ms cubic-bezier(.22,.84,.44,1), transform ${FIVE_SLIDE_OUT_MS}ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease`;
-  card.style.left = '130%';
-  card.style.transform = 'translate(-50%,-50%) scale(0.9)';
-  card.style.opacity = '0';
-  await sleep(FIVE_SLIDE_OUT_MS + 40);
-  card.remove();
+async function triggerFiveSlideSequence(foundByPlayerId){
+  if (!state.roomCode) return;
+  const shouldEmit = foundByPlayerId ? (state.userId === foundByPlayerId) : state.isHost;
+  if (shouldEmit){
+    await emitFiveSlideEvent();
+  }
+  await sleep(FIVE_SLIDE_TOTAL_MS + 80);
 }
 
 /* ★全員：✕拡大→下から中央へ */
@@ -4983,8 +5006,7 @@ async function handleEffect3Pick(targetPlayerId, cardIndex){
     hideConfirmPop();
 
     await sleep(FIVE_ARROW_DELAY_MS);
-    await emitFiveSlideEvent();
-    await sleep(FIVE_SLIDE_TOTAL_MS);
+    await triggerFiveSlideSequence(ef.playerId);
     if (!state.gameOver){
       await setGameOverFoundFive(ef.playerId);
     }
