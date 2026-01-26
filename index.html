@@ -2466,7 +2466,10 @@ function updateTurnUI(){
   playerCircle.classList.toggle('turn-paused', !!state.turn.paused);
 
   if (state.gameOver){
-    if (state.gameOver?.reason === 'found5' || state.gameOver?.reason === 'lastSurvivor'){
+    if (state.gameOver?.reason === 'found5'){
+      showGameOver(state.gameOver?.text || 'ゲーム終了');
+      hideCenterNotice();
+    } else if (state.gameOver?.reason === 'lastSurvivor'){
       hideGameOver();
       showCenterNotice(state.gameOver?.text || '');
     } else {
