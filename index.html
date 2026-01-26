@@ -1487,26 +1487,73 @@ function getCardDecorCount(value){
 
 function fitTextToBox(container, textEl, { minSize = 4, maxSize = 10 } = {}){
   const text = textEl.textContent || '';
-  if (!text) return;
+  if (!text) return false;
 
   const rect = container.getBoundingClientRect();
-  if (!rect.width || !rect.height){
+  const baseWidth = container.offsetWidth || rect.width;
+  const baseHeight = container.offsetHeight || rect.height;
+  if (!rect.width || !rect.height || !baseWidth || !baseHeight){
     const approx = Math.max(minSize, Math.min(maxSize, Math.floor(42 / Math.max(1, text.length))));
     textEl.style.fontSize = `${approx}px`;
+    return false;
+  }
+
+  const scaleX = rect.width / baseWidth;
+  const scaleY = rect.height / baseHeight;
+  const scaledWidth = rect.width;
+  const scaledHeight = rect.height;
+
+  const maxByHeight = Math.floor((scaledHeight * 0.6) / Math.max(0.1, scaleY));
+  const maxByWidth = Math.floor((scaledWidth * 0.28) / Math.max(0.1, scaleX));
+  let size = Math.min(maxSize, Math.max(minSize, maxByHeight, maxByWidth));
+
+  for (let i = 0; i < 26; i++){
+    textEl.style.fontSize = `${size}px`;
+    const scrollWidth = textEl.scrollWidth * scaleX;
+    const scrollHeight = textEl.scrollHeight * scaleY;
+    if (scrollWidth <= scaledWidth && scrollHeight <= scaledHeight) break;
+    size = Math.max(minSize, size - 0.5);
+    if (size <= minSize) break;
+  }
+  return true;
+}
+
+function attachDecorRightFitter(cardEl, decorRight, effectText, fitOptions){
+  const MAX_RETRY = 4;
+  let rafId = null;
+  let retry = 0;
+
+  const runFit = () => {
+    rafId = null;
+    const measured = fitTextToBox(decorRight, effectText, fitOptions);
+    if (!measured && retry < MAX_RETRY){
+      retry += 1;
+      rafId = requestAnimationFrame(runFit);
+    }
+  };
+
+  const schedule = () => {
+    retry = 0;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(runFit);
+  };
+
+  schedule();
+
+  if (decorRight._fitObserver || !('ResizeObserver' in window)){
     return;
   }
 
-  const maxByHeight = Math.floor(rect.height * 0.6);
-  const maxByWidth = Math.floor(rect.width * 0.28);
-  let size = Math.min(maxSize, Math.max(minSize, maxByHeight, maxByWidth));
-  textEl.style.fontSize = `${size}px`;
+  const ro = new ResizeObserver(schedule);
+  ro.observe(decorRight);
+  ro.observe(cardEl);
 
-  for (let i = 0; i < 24; i++){
-    if (textEl.scrollWidth <= rect.width && textEl.scrollHeight <= rect.height) break;
-    size = Math.max(minSize, size - 0.5);
-    textEl.style.fontSize = `${size}px`;
-    if (size <= minSize) break;
-  }
+  const mo = new MutationObserver((entries) => {
+    if (entries.some((entry) => entry.type === 'attributes')) schedule();
+  });
+  mo.observe(cardEl, { attributes:true, attributeFilter:['class', 'style'] });
+
+  decorRight._fitObserver = { ro, mo };
 }
 
 function setCardFace(el, value){
@@ -1573,16 +1620,7 @@ function setCardFace(el, value){
     : (isLargeFace ? { minSize: 12, maxSize: 16 }
       : (isMiniZoom ? { minSize: 4, maxSize: 9 }
         : (isCompactFace ? { minSize: 3, maxSize: 8 } : { minSize: 4, maxSize: 10 })));
-  requestAnimationFrame(() => {
-    fitTextToBox(decorRight, effectText, fitOptions);
-  });
-  if (!decorRight._fitObserver && 'ResizeObserver' in window){
-    const ro = new ResizeObserver(() => {
-      fitTextToBox(decorRight, effectText, fitOptions);
-    });
-    ro.observe(decorRight);
-    decorRight._fitObserver = ro;
-  }
+  attachDecorRightFitter(el, decorRight, effectText, fitOptions);
 
   overlay.appendChild(title);
   overlay.appendChild(decorLeft);
