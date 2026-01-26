@@ -992,6 +992,14 @@
     align-items:center;
     justify-content:center;
   }
+  .mini-card.x-reveal-target{
+    transform:translate(-50%,0) rotate(var(--rot,0deg)) scale(1.5) !important;
+    z-index:92;
+  }
+  .my-card.x-reveal-target{
+    transform:scale(1.5);
+    z-index:92;
+  }
 
   /* ゲーム終了表示 */
   .gameover-pop{
@@ -1011,6 +1019,25 @@
   }
   .gameover-box .ttl{ font-weight:1000; font-size:16px; margin-bottom:6px; }
   .gameover-box .txt{ font-size:13px; line-height:1.55; opacity:.92; }
+
+  .center-notice{
+    position:fixed;
+    left:50%;
+    top:50%;
+    transform:translate(-50%, -50%);
+    background:rgba(0,0,0,.88);
+    color:#fff;
+    padding:14px 18px;
+    border-radius:14px;
+    font-size:16px;
+    font-weight:800;
+    letter-spacing:.05em;
+    z-index:996;
+    box-shadow:0 18px 40px rgba(0,0,0,.4);
+    white-space:nowrap;
+    pointer-events:none;
+  }
+  .center-notice.hidden{ display:none; }
 
   .exploration-pop{
     position:fixed;
@@ -1108,6 +1135,10 @@
     animation: fanPickPulse 720ms ease-in-out infinite;
     outline:2px solid rgba(37,99,235,.0);
   }
+  .mini-card.exploration-front.exploration-pickable{
+    animation:none;
+    pointer-events:none;
+  }
   .mini-card.exploration-pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
   }
@@ -1120,6 +1151,10 @@
     cursor:pointer;
     animation: ruinsPulse 760ms ease-in-out infinite;
     outline:2px solid rgba(37,99,235,.0);
+  }
+  .ruins-card.exploration-front.exploration-pickable{
+    animation:none;
+    pointer-events:none;
   }
   .ruins-card.exploration-pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
@@ -1281,6 +1316,8 @@
   </div>
 </div>
 
+<div id="centerNotice" class="center-notice hidden"></div>
+
 <div id="explorationPop" class="exploration-pop hidden">探索フェイス</div>
 
 <script type="module">
@@ -1310,6 +1347,12 @@ const DRAW_COMMIT_DELAY_MS = 620;
 const RESHUFFLE_ANIM_MS = 980;
 const RUIN_MOVE_ANIM_MS = 760;
 const RUIN_TAKE_ANIM_MS = 760;
+const FIVE_SLIDE_IN_MS = 600;
+const FIVE_SLIDE_HOLD_MS = 1200;
+const FIVE_SLIDE_OUT_MS = 520;
+const FIVE_SLIDE_TOTAL_MS = FIVE_SLIDE_IN_MS + 120 + FIVE_SLIDE_HOLD_MS + FIVE_SLIDE_OUT_MS;
+const LAST_SURVIVOR_DELAY_MS = 1200;
+const XRAY_MINI_DELAY_MS = 1200;
 
 const CARD_META = {
   "1": { name: "宿命の少女", reading: "しゅくめい\u3000しょうじょ" },
@@ -1613,6 +1656,7 @@ const globalOneBackdrop = document.getElementById('globalOneBackdrop');
 
 const gameOverPop = document.getElementById('gameOverPop');
 const gameOverTxt = document.getElementById('gameOverTxt');
+const centerNotice = document.getElementById('centerNotice');
 const explorationPop = document.getElementById('explorationPop');
 
 let effectArrowOverlayEl = null;
@@ -1693,6 +1737,16 @@ function hideGameOver(){
   gameOverPop.classList.add('hidden');
 }
 
+function showCenterNotice(text){
+  if (!centerNotice) return;
+  centerNotice.textContent = text || '';
+  centerNotice.classList.toggle('hidden', !text);
+}
+function hideCenterNotice(){
+  if (!centerNotice) return;
+  centerNotice.classList.add('hidden');
+}
+
 async function showExplorationFace(){
   explorationPop.classList.remove('hidden');
   await sleep(1000);
@@ -1702,6 +1756,8 @@ async function showExplorationFace(){
 let explorationSequenceActive = false;
 let explorationSelectionCleanup = null;
 let explorationSelectionTimer = null;
+let tempArrowConfig = null;
+let lastSurvivorTimer = null;
 
 function getCardRank(value){
   if (value === null || value === undefined) return null;
@@ -1728,6 +1784,62 @@ function getExplorationGroups(){
   return [...groups.entries()]
     .sort((a,b) => a[0] - b[0])
     .map(([rank, players]) => ({ rank, players }));
+}
+
+function getPlayerNameById(playerId){
+  if (!playerId) return '';
+  const match = latestPlayers.find(p => p.id === playerId);
+  return match?.name || '';
+}
+
+function getAlivePlayers(){
+  return latestPlayers.filter(p => !state.eliminated?.[p.id]);
+}
+
+async function maybeDeclareLastSurvivor(){
+  if (!state.isHost || !state.roomCode) return;
+  if (state.gameOver) return;
+  const alive = getAlivePlayers();
+  if (alive.length !== 1) return;
+
+  const winner = alive[0];
+  await Promise.all([
+    set(ref(db, `rooms/${state.roomCode}/gameOver`), {
+      by: winner.id,
+      reason: 'lastSurvivor',
+      at: Date.now(),
+      text: `${winner.name}だけが生存しました。`
+    }),
+    update(ref(db, `rooms/${state.roomCode}/turn`), { paused:true })
+  ]);
+}
+
+function scheduleLastSurvivorCheck(){
+  if (lastSurvivorTimer){
+    clearTimeout(lastSurvivorTimer);
+    lastSurvivorTimer = null;
+  }
+  if (!state.isHost || state.gameOver) return;
+  const alive = getAlivePlayers();
+  if (alive.length !== 1) return;
+  lastSurvivorTimer = setTimeout(async () => {
+    lastSurvivorTimer = null;
+    await maybeDeclareLastSurvivor();
+  }, LAST_SURVIVOR_DELAY_MS);
+}
+
+async function setGameOverFoundFive(byPlayerId){
+  if (!state.roomCode) return;
+  const name = getPlayerNameById(byPlayerId) || '誰か';
+  await Promise.all([
+    set(ref(db, `rooms/${state.roomCode}/gameOver`), {
+      by: byPlayerId || null,
+      reason: 'found5',
+      at: Date.now(),
+      text: `${name}がロストレガシーを発見しました。`
+    }),
+    update(ref(db, `rooms/${state.roomCode}/turn`), { paused:true })
+  ]);
 }
 
 function setPlayerHandReveal(playerId, active, { flip = false } = {}){
@@ -1813,6 +1925,38 @@ function setXRevealHand(playerId, active){
   });
 }
 
+function setXRevealTargetCard(playerId, cardIndex, active){
+  if (!playerId || !Number.isFinite(Number(cardIndex))) return;
+  const idx = Number(cardIndex);
+  const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
+  const value = cards[idx];
+
+  if (playerId === state.userId){
+    const card = myHandEl.querySelector(`.my-card[data-index="${idx}"]`);
+    if (!card) return;
+    if (active){
+      card.classList.add('x-reveal-target');
+      if (value != null) setCardFace(card, value);
+    } else {
+      card.classList.remove('x-reveal-target');
+    }
+    return;
+  }
+
+  const fan = playerCircle.querySelector(`.player-fan[data-pid="${playerId}"]`);
+  if (!fan) return;
+  const card = fan.querySelector(`.mini-card[data-idx="${idx}"]`);
+  if (!card) return;
+
+  if (active){
+    card.classList.add('x-reveal-front', 'x-reveal-target');
+    if (value != null) setCardFace(card, value);
+  } else {
+    card.classList.remove('x-reveal-target', 'x-reveal-front');
+    clearCardFaceVisual(card);
+  }
+}
+
 function setExplorationTieShake(playerId, active){
   if (playerId === state.userId){
     myHandRow.classList.toggle('exploration-tie-shake', active);
@@ -1875,11 +2019,11 @@ function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
     const pickables = [];
     const otherMiniCards = playerCircle.querySelectorAll(`.player-fan:not([data-pid="${state.userId}"]) .mini-card`);
     otherMiniCards.forEach((el) => {
-      if (el.dataset.value) pickables.push(el);
+      if (el.dataset.value && !el.classList.contains('exploration-front')) pickables.push(el);
     });
     const ruinCards = playerCircle.querySelectorAll('.ruins-card');
     ruinCards.forEach((el) => {
-      if (el.dataset.value) pickables.push(el);
+      if (el.dataset.value && !el.classList.contains('exploration-front')) pickables.push(el);
     });
 
     if (!pickables.length){
@@ -1900,7 +2044,7 @@ function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
         playerId: state.userId,
         value: selection?.value ?? null,
       });
-      resolve(selection);
+      resolve({ ...selection, playerId: state.userId });
     };
 
     const cleanup = () => {
@@ -1945,10 +2089,13 @@ async function animateExplorationCenterDrop(value){
   card.remove();
 }
 
-async function handleExplorationSelection(value, { keepFront = false } = {}){
+async function handleExplorationSelection(value, { keepFront = false, explorerId = null } = {}){
   if (!value) return;
   if (String(value) === '5'){
     await animateGlobalFiveSlide();
+    if (state.isHost && !state.gameOver){
+      await setGameOverFoundFive(explorerId);
+    }
     clearExplorationPickedCard({ keepFront });
     return;
   }
@@ -1984,7 +2131,7 @@ async function runExplorationPhaseSequence(eventId){
 
       const pid = group.players[0];
       const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
-      await handleExplorationSelection(selection?.value, { keepFront: true });
+      await handleExplorationSelection(selection?.value, { keepFront: true, explorerId: selection?.playerId || pid });
     }
   } finally {
     revealedPlayers.forEach((pid) => setPlayerHandReveal(pid, false));
@@ -2114,10 +2261,16 @@ function updateTurnUI(){
   playerCircle.classList.toggle('turn-paused', !!state.turn.paused);
 
   if (state.gameOver){
-    if (state.gameOver?.reason === 'found5') hideGameOver();
-    else showGameOver(state.gameOver?.text || 'ゲーム終了');
+    if (state.gameOver?.reason === 'found5' || state.gameOver?.reason === 'lastSurvivor'){
+      hideGameOver();
+      showCenterNotice(state.gameOver?.text || '');
+    } else {
+      showGameOver(state.gameOver?.text || 'ゲーム終了');
+      hideCenterNotice();
+    }
   } else {
     hideGameOver();
+    hideCenterNotice();
   }
 }
 
@@ -2187,6 +2340,7 @@ function subscribeEliminated(){
   onValue(eRef, snap => {
     state.eliminated = snap.val() || {};
     updateTurnUI();
+    scheduleLastSurvivorCheck();
   });
 }
 
@@ -2194,6 +2348,10 @@ function subscribeGameOver(){
   const gRef = ref(db, `rooms/${state.roomCode}/gameOver`);
   onValue(gRef, snap => {
     state.gameOver = snap.val() || null;
+    if (state.gameOver && lastSurvivorTimer){
+      clearTimeout(lastSurvivorTimer);
+      lastSurvivorTimer = null;
+    }
     updateTurnUI();
   });
 }
@@ -2538,9 +2696,25 @@ function subscribeXRevealEvent(){
     if (ev.at && (now - ev.at) > 20000) return;
 
     const mode = ev.mode || 'effect38';
-    await animateGlobalXReveal(mode);
-    if (mode === 'effect4' && ev.targetPlayerId){
-      await animateEffect4XOwnerReveal(ev.targetPlayerId);
+    if (mode === 'effect38' && ev.targetPlayerId && Number.isFinite(Number(ev.targetCardIndex))){
+      showTempArrow({
+        fromPid: ev.fromPlayerId,
+        toPid: ev.targetPlayerId,
+        targetCardIndex: ev.targetCardIndex,
+        showEye: true,
+        durationMs: XRAY_MINI_DELAY_MS,
+      });
+      setXRevealTargetCard(ev.targetPlayerId, ev.targetCardIndex, true);
+      await sleep(XRAY_MINI_DELAY_MS);
+      await animateGlobalXReveal(mode);
+      await sleep(XRAY_MINI_DELAY_MS);
+      await animateMiniXToDiscard(ev.targetPlayerId, ev.targetCardIndex);
+      setXRevealTargetCard(ev.targetPlayerId, ev.targetCardIndex, false);
+    } else {
+      await animateGlobalXReveal(mode);
+      if (mode === 'effect4' && ev.targetPlayerId){
+        await animateEffect4XOwnerReveal(ev.targetPlayerId);
+      }
     }
   });
 }
@@ -3293,13 +3467,15 @@ async function emitFiveSlideEvent(){
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), { id, at: Date.now() });
 }
-async function emitXRevealEvent(mode, targetPlayerId){
+async function emitXRevealEvent(mode, targetPlayerId, fromPlayerId, targetCardIndex){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), {
     id,
     mode: mode || 'effect38',
     targetPlayerId: targetPlayerId || null,
+    fromPlayerId: fromPlayerId || null,
+    targetCardIndex: Number.isFinite(Number(targetCardIndex)) ? Number(targetCardIndex) : null,
     at: Date.now()
   });
 }
@@ -3471,6 +3647,11 @@ function getPlayerCardAnchorEl(playerId, cardIndex){
   if (!playerId && playerId !== 0) return null;
   if (!Number.isFinite(Number(cardIndex))) return null;
   return playerCircle.querySelector(`.mini-card[data-pid="${playerId}"][data-idx="${cardIndex}"]`);
+}
+
+function getPlayedRowAnchorEl(playerId){
+  if (!playerId && playerId !== 0) return null;
+  return playerCircle.querySelector(`.played-row[data-pid="${playerId}"]`);
 }
 
 async function animateDrawFromDeckToPlayer(playerId){
@@ -3725,21 +3906,21 @@ async function animateGlobalFiveSlide(){
   card.style.left = '-30%';
   card.style.transform = 'translate(-50%,-50%) scale(0.75)';
   void card.offsetWidth;
-  card.style.transition = 'left 600ms cubic-bezier(.22,.84,.44,1), transform 600ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease';
+  card.style.transition = `left ${FIVE_SLIDE_IN_MS}ms cubic-bezier(.22,.84,.44,1), transform ${FIVE_SLIDE_IN_MS}ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease`;
   card.style.left = '50%';
   card.style.transform = 'translate(-50%,-50%) scale(1.12)';
-  await sleep(640);
+  await sleep(FIVE_SLIDE_IN_MS + 40);
 
   card.style.transition = 'transform 120ms ease';
   card.style.transform = 'translate(-50%,-50%) scale(1.08)';
   await sleep(120);
-  await sleep(1500);
+  await sleep(FIVE_SLIDE_HOLD_MS);
 
-  card.style.transition = 'left 520ms cubic-bezier(.22,.84,.44,1), transform 520ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease';
+  card.style.transition = `left ${FIVE_SLIDE_OUT_MS}ms cubic-bezier(.22,.84,.44,1), transform ${FIVE_SLIDE_OUT_MS}ms cubic-bezier(.22,.84,.44,1), opacity 220ms ease`;
   card.style.left = '130%';
   card.style.transform = 'translate(-50%,-50%) scale(0.9)';
   card.style.opacity = '0';
-  await sleep(560);
+  await sleep(FIVE_SLIDE_OUT_MS + 40);
   card.remove();
 }
 
@@ -3795,6 +3976,64 @@ async function animateEffect4XOwnerReveal(targetPlayerId){
   await sleep(EFFECT4_X_HAND_REVEAL_MS);
   setXRevealHand(targetPlayerId, false);
   await sleep(EFFECT4_X_HAND_RETURN_MS);
+}
+
+async function animateMiniXToDiscard(targetPlayerId, cardIndex){
+  if (!targetPlayerId || !Number.isFinite(Number(cardIndex))) return;
+
+  let startX = null;
+  let startY = null;
+  let endX = null;
+  let endY = null;
+
+  if (targetPlayerId === state.userId){
+    const cardEl = myHandEl.querySelector(`.my-card[data-index="${cardIndex}"]`);
+    if (cardEl){
+      const rect = cardEl.getBoundingClientRect();
+      startX = rect.left + rect.width / 2;
+      startY = rect.top + rect.height / 2;
+    }
+  } else {
+    const cardEl = getPlayerCardAnchorEl(targetPlayerId, cardIndex);
+    if (cardEl){
+      const rect = cardEl.getBoundingClientRect();
+      startX = rect.left + rect.width / 2;
+      startY = rect.top + rect.height / 2;
+    }
+  }
+
+  const rowEl = getPlayedRowAnchorEl(targetPlayerId);
+  if (rowEl){
+    const rect = rowEl.getBoundingClientRect();
+    endX = rect.left + rect.width / 2;
+    endY = rect.top + rect.height / 2;
+  } else {
+    const anchor = getPlayerAnchorEl(targetPlayerId);
+    if (anchor){
+      const rect = anchor.getBoundingClientRect();
+      endX = rect.left + rect.width / 2;
+      endY = rect.top + rect.height / 2;
+    }
+  }
+
+  if (startX == null || startY == null || endX == null || endY == null) return;
+
+  const flyer = createFaceFlyer('x');
+  flyer.style.left = `${startX}px`;
+  flyer.style.top = `${startY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) scale(1.5)';
+  document.body.appendChild(flyer);
+
+  await sleep(0);
+  flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease, opacity 180ms ease';
+  flyer.style.left = `${endX}px`;
+  flyer.style.top = `${endY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) scale(0.72)';
+  await sleep(460);
+
+  flyer.style.opacity = '0';
+  await sleep(180);
+  flyer.remove();
 }
 
 /* ★全員：1拡大 */
@@ -3993,8 +4232,7 @@ async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
   const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
 
   const flyer = document.createElement('div');
-  flyer.className = 'front-flyer face-flyer ruin-reveal-flyer';
-  setCardFace(flyer, cardValue);
+  flyer.className = 'back-flyer';
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(0.9)';
@@ -4011,18 +4249,6 @@ async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
   flyer.style.top  = `${endY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.86)';
   await sleep(440);
-
-  flyer.style.transition = 'transform 200ms ease, opacity 200ms ease, background 200ms ease, color 200ms ease';
-  flyer.style.transform = 'translate(-50%,-50%) rotateY(180deg) scale(0.72)';
-  flyer.style.background = 'var(--card-back-image)';
-  flyer.style.backgroundColor = '#fff';
-  flyer.style.backgroundSize = 'cover';
-  flyer.style.backgroundPosition = 'center';
-  flyer.style.color = 'transparent';
-  flyer.style.opacity = '0.9';
-  const faceEl = flyer.querySelector('.card-face');
-  if (faceEl) faceEl.style.opacity = '0';
-  await sleep(220);
 
   await waitForRuinCard(slotIndex);
 
@@ -4318,7 +4544,7 @@ async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealing
   hideConfirmPop();
 
   await clearEffectsForXReveal();
-  await emitXRevealEvent('effect38');
+  await emitXRevealEvent('effect38', targetPlayerId, revealingPlayerId || null, cardIndex);
 
   await sleep(3000);
   let value = removedValue;
@@ -4563,17 +4789,10 @@ async function handleEffect3Pick(targetPlayerId, cardIndex){
     hideConfirmPop();
 
     await emitFiveSlideEvent();
-
-    // ゲーム終了フラグ + ターン停止
-    await Promise.all([
-      set(ref(db, `rooms/${state.roomCode}/gameOver`), {
-        by: state.userId,
-        reason: 'found5',
-        at: Date.now(),
-        text: '「5」が見えたためゲーム終了'
-      }),
-      update(ref(db, `rooms/${state.roomCode}/turn`), { paused:true })
-    ]);
+    await sleep(FIVE_SLIDE_TOTAL_MS);
+    if (!state.gameOver){
+      await setGameOverFoundFive(ef.playerId);
+    }
 
     // effect3は残しても良いが、以後の操作不要なので消す
     await set(ref(db, `rooms/${state.roomCode}/effect3`), null);
@@ -5245,6 +5464,7 @@ function subscribePlayers(){
 
     await syncSeatUI();
     renderPlayerCircle(players);
+    scheduleLastSurvivorCheck();
   });
 }
 
@@ -5303,7 +5523,9 @@ function renderEffectArrowLayer(players){
 
   let config = null;
 
-  if (ef3 && ef3.phase === 'confirm' && ef3.playerId && ef3.targetPlayerId){
+  if (tempArrowConfig && tempArrowConfig.show){
+    config = { ...tempArrowConfig };
+  } else if (ef3 && ef3.phase === 'confirm' && ef3.playerId && ef3.targetPlayerId){
     config = {
       fromPid: ef3.playerId,
       toPid: ef3.targetPlayerId,
@@ -5426,6 +5648,24 @@ function renderEffectArrowLayer(players){
       eye.setAttribute('y', String(my));
     }
   });
+}
+
+function showTempArrow({ fromPid, toPid, targetCardIndex, showEye = false, bothEnds = false, durationMs = 1200 } = {}){
+  if (!fromPid || !toPid) return;
+  tempArrowConfig = {
+    fromPid,
+    toPid,
+    targetCardIndex,
+    showEye,
+    bothEnds,
+    show: true,
+  };
+  renderEffectArrowLayer(latestPlayers);
+  setTimeout(() => {
+    if (!tempArrowConfig) return;
+    tempArrowConfig = null;
+    renderEffectArrowLayer(latestPlayers);
+  }, durationMs);
 }
 
 function renderPlayerCircle(players){
