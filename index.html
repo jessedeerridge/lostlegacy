@@ -1351,6 +1351,7 @@ const FIVE_SLIDE_IN_MS = 600;
 const FIVE_SLIDE_HOLD_MS = 1200;
 const FIVE_SLIDE_OUT_MS = 520;
 const FIVE_SLIDE_TOTAL_MS = FIVE_SLIDE_IN_MS + 120 + FIVE_SLIDE_HOLD_MS + FIVE_SLIDE_OUT_MS;
+const FIVE_ARROW_DELAY_MS = 1200;
 const LAST_SURVIVOR_DELAY_MS = 1200;
 const XRAY_MINI_DELAY_MS = 1200;
 
@@ -1758,6 +1759,7 @@ let explorationSelectionCleanup = null;
 let explorationSelectionTimer = null;
 let tempArrowConfig = null;
 let lastSurvivorTimer = null;
+let pendingXRevealTarget = null;
 
 function getCardRank(value){
   if (value === null || value === undefined) return null;
@@ -2130,8 +2132,20 @@ async function runExplorationPhaseSequence(eventId){
       }
 
       const pid = group.players[0];
+      if (pid === state.userId){
+        const myCards = Array.isArray(state.hands?.[pid]?.cards) ? state.hands[pid].cards : [];
+        if (myCards.some((v) => String(v) === '5')){
+          await sleep(920);
+          if (state.isHost && !state.gameOver){
+            await setGameOverFoundFive(pid);
+          }
+          return;
+        }
+      }
+
       const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
       await handleExplorationSelection(selection?.value, { keepFront: true, explorerId: selection?.playerId || pid });
+      if (state.gameOver) return;
     }
   } finally {
     revealedPlayers.forEach((pid) => setPlayerHandReveal(pid, false));
@@ -2616,6 +2630,17 @@ function subscribeRuinMoveEvent(){
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
       return;
     }
+    if (mode === 'xReveal'){
+      const idx = pendingXRevealTarget && pendingXRevealTarget.playerId === fromPid
+        ? Number(pendingXRevealTarget.cardIndex)
+        : null;
+      if (Number.isFinite(idx)){
+        animateXRevealMoveToRuin(fromPid, idx, slotIndex);
+      } else {
+        animateMoveFromPlayerToRuin(fromPid, String(cardValue ?? ''), slotIndex);
+      }
+      return;
+    }
 
     animateMoveFromPlayerToRuin(fromPid, String(cardValue ?? ''), slotIndex);
   });
@@ -2696,7 +2721,8 @@ function subscribeXRevealEvent(){
     if (ev.at && (now - ev.at) > 20000) return;
 
     const mode = ev.mode || 'effect38';
-    if (mode === 'effect38' && ev.targetPlayerId && Number.isFinite(Number(ev.targetCardIndex))){
+    const hasTarget = ev.targetPlayerId && Number.isFinite(Number(ev.targetCardIndex));
+    if ((mode === 'effect38' || mode === 'effect4') && hasTarget){
       showTempArrow({
         fromPid: ev.fromPlayerId,
         toPid: ev.targetPlayerId,
@@ -2705,16 +2731,22 @@ function subscribeXRevealEvent(){
         durationMs: XRAY_MINI_DELAY_MS,
       });
       setXRevealTargetCard(ev.targetPlayerId, ev.targetCardIndex, true);
+      const rect = getPlayerCardRect(ev.targetPlayerId, ev.targetCardIndex);
+      pendingXRevealTarget = {
+        playerId: ev.targetPlayerId,
+        cardIndex: Number(ev.targetCardIndex),
+        rect: rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null,
+      };
       await sleep(XRAY_MINI_DELAY_MS);
       await animateGlobalXReveal(mode);
       await sleep(XRAY_MINI_DELAY_MS);
-      await animateMiniXToDiscard(ev.targetPlayerId, ev.targetCardIndex);
-      setXRevealTargetCard(ev.targetPlayerId, ev.targetCardIndex, false);
+      if (mode === 'effect38'){
+        await animateMiniXToDiscard(ev.targetPlayerId, ev.targetCardIndex);
+        setXRevealTargetCard(ev.targetPlayerId, ev.targetCardIndex, false);
+        pendingXRevealTarget = null;
+      }
     } else {
       await animateGlobalXReveal(mode);
-      if (mode === 'effect4' && ev.targetPlayerId){
-        await animateEffect4XOwnerReveal(ev.targetPlayerId);
-      }
     }
   });
 }
@@ -3649,6 +3681,19 @@ function getPlayerCardAnchorEl(playerId, cardIndex){
   return playerCircle.querySelector(`.mini-card[data-pid="${playerId}"][data-idx="${cardIndex}"]`);
 }
 
+function getPlayerCardRect(playerId, cardIndex){
+  if (!Number.isFinite(Number(cardIndex))) return null;
+  const idx = Number(cardIndex);
+  if (playerId === state.userId){
+    const cardEl = myHandEl.querySelector(`.my-card[data-index="${idx}"]`);
+    if (!cardEl) return null;
+    return cardEl.getBoundingClientRect();
+  }
+  const cardEl = getPlayerCardAnchorEl(playerId, idx);
+  if (!cardEl) return null;
+  return cardEl.getBoundingClientRect();
+}
+
 function getPlayedRowAnchorEl(playerId){
   if (!playerId && playerId !== 0) return null;
   return playerCircle.querySelector(`.played-row[data-pid="${playerId}"]`);
@@ -4232,29 +4277,109 @@ async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
   const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
 
   const flyer = document.createElement('div');
-  flyer.className = 'back-flyer';
+  flyer.className = 'front-flyer face-flyer ruin-reveal-flyer';
+  setCardFace(flyer, cardValue);
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(0.9)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1.5)';
   document.body.appendChild(flyer);
 
   await sleep(0);
   flyer.style.transition = 'transform 120ms ease, top 120ms ease';
   flyer.style.top = `${startY - 16}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(-16deg) scale(1.0)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-16deg) scale(1.5)';
   await sleep(140);
 
   flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
   flyer.style.left = `${endX}px`;
   flyer.style.top  = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.86)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(1.1)';
   await sleep(440);
+
+  flyer.style.transition = 'transform 200ms ease, opacity 200ms ease, background 200ms ease, color 200ms ease';
+  flyer.style.transform = 'translate(-50%,-50%) rotateY(180deg) scale(0.72)';
+  flyer.style.background = 'var(--card-back-image)';
+  flyer.style.backgroundColor = '#fff';
+  flyer.style.backgroundSize = 'cover';
+  flyer.style.backgroundPosition = 'center';
+  flyer.style.color = 'transparent';
+  flyer.style.opacity = '0.95';
+  const faceEl = flyer.querySelector('.card-face');
+  if (faceEl) faceEl.style.opacity = '0';
+  await sleep(220);
 
   await waitForRuinCard(slotIndex);
 
   flyer.style.opacity = '0';
   await sleep(120);
   flyer.remove();
+}
+
+async function animateXRevealMoveToRuin(playerId, cardIndex, slotIndex){
+  let startX, startY;
+  const rect = getPlayerCardRect(playerId, cardIndex)
+    || (pendingXRevealTarget && pendingXRevealTarget.playerId === playerId && pendingXRevealTarget.rect
+      ? pendingXRevealTarget.rect
+      : null);
+
+  if (rect){
+    startX = rect.left + rect.width / 2;
+    startY = rect.top + rect.height / 2;
+  } else {
+    const anchor = getPlayerAnchorEl(playerId);
+    if (anchor){
+      const sr = anchor.getBoundingClientRect();
+      startX = sr.left + sr.width / 2;
+      startY = sr.top + sr.height / 2;
+    } else {
+      const pc = playerCircle.getBoundingClientRect();
+      startX = pc.left + pc.width / 2;
+      startY = pc.top + pc.height / 2;
+    }
+  }
+
+  const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
+
+  const flyer = createFaceFlyer('x');
+  flyer.style.left = `${startX}px`;
+  flyer.style.top = `${startY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1.5)';
+  document.body.appendChild(flyer);
+
+  await sleep(0);
+  flyer.style.transition = 'transform 120ms ease, top 120ms ease';
+  flyer.style.top = `${startY - 16}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-16deg) scale(1.5)';
+  await sleep(140);
+
+  flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
+  flyer.style.left = `${endX}px`;
+  flyer.style.top = `${endY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(1.1)';
+  await sleep(440);
+
+  flyer.style.transition = 'transform 200ms ease, opacity 200ms ease, background 200ms ease, color 200ms ease';
+  flyer.style.transform = 'translate(-50%,-50%) rotateY(180deg) scale(0.72)';
+  flyer.style.background = 'var(--card-back-image)';
+  flyer.style.backgroundColor = '#fff';
+  flyer.style.backgroundSize = 'cover';
+  flyer.style.backgroundPosition = 'center';
+  flyer.style.color = 'transparent';
+  flyer.style.opacity = '0.95';
+  const faceEl = flyer.querySelector('.card-face');
+  if (faceEl) faceEl.style.opacity = '0';
+  await sleep(220);
+
+  await waitForRuinCard(slotIndex);
+
+  flyer.style.opacity = '0';
+  await sleep(120);
+  flyer.remove();
+
+  if (Number.isFinite(Number(cardIndex))){
+    setXRevealTargetCard(playerId, cardIndex, false);
+  }
+  pendingXRevealTarget = null;
 }
 
 async function animateReshufflePlayedToDeck(count){
@@ -4573,8 +4698,8 @@ async function resolveEffect4XReveal(targetPlayerId, cardIndex){
   hidePeekCard();
   hideConfirmPop();
 
-  await emitXRevealEvent('effect4', targetPlayerId);
-  await sleep(EFFECT4_X_GLOBAL_MS + EFFECT4_X_AFTER_CLOSE_DELAY_MS + EFFECT4_X_HAND_REVEAL_MS + EFFECT4_X_HAND_RETURN_MS);
+  await emitXRevealEvent('effect4', targetPlayerId, state.userId, cardIndex);
+  await sleep(XRAY_MINI_DELAY_MS + EFFECT4_X_GLOBAL_MS + XRAY_MINI_DELAY_MS);
 
   const value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
   if (value != null){
@@ -4788,6 +4913,7 @@ async function handleEffect3Pick(targetPlayerId, cardIndex){
     hidePeekCard();
     hideConfirmPop();
 
+    await sleep(FIVE_ARROW_DELAY_MS);
     await emitFiveSlideEvent();
     await sleep(FIVE_SLIDE_TOTAL_MS);
     if (!state.gameOver){
