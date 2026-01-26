@@ -1832,8 +1832,26 @@ function cleanupExplorationSelection(){
   }
 }
 
-function waitForExplorationSelection(activePlayerId){
-  if (activePlayerId !== state.userId) return Promise.resolve(null);
+function waitForExplorationPickEvent({ eventId, rank, playerId } = {}){
+  if (!state.roomCode) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const evRef = ref(db, `rooms/${state.roomCode}/explorationPickEvent`);
+    const unsubscribe = onValue(evRef, (snap) => {
+      const ev = snap.val();
+      if (!ev || !ev.id) return;
+      if (eventId && ev.eventId !== eventId) return;
+      if (Number.isFinite(rank) && ev.rank !== rank) return;
+      if (playerId && ev.playerId !== playerId) return;
+      unsubscribe();
+      resolve(ev);
+    });
+  });
+}
+
+function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
+  if (activePlayerId !== state.userId){
+    return waitForExplorationPickEvent({ eventId, rank, playerId: activePlayerId });
+  }
 
   return new Promise((resolve) => {
     const pickables = [];
@@ -1854,10 +1872,16 @@ function waitForExplorationSelection(activePlayerId){
     let resolved = false;
     const listeners = [];
 
-    const finalize = (selection) => {
+    const finalize = async (selection) => {
       if (resolved) return;
       resolved = true;
       cleanupExplorationSelection();
+      await emitExplorationPickEvent({
+        eventId,
+        rank,
+        playerId: state.userId,
+        value: selection?.value ?? null,
+      });
       resolve(selection);
     };
 
@@ -1916,7 +1940,7 @@ async function handleExplorationSelection(value){
   clearExplorationPickedCard();
 }
 
-async function runExplorationPhaseSequence(){
+async function runExplorationPhaseSequence(eventId){
   if (explorationSequenceActive) return;
   explorationSequenceActive = true;
 
@@ -1940,12 +1964,8 @@ async function runExplorationPhaseSequence(){
       }
 
       const pid = group.players[0];
-      if (pid === state.userId){
-        const selection = await waitForExplorationSelection(pid);
-        await handleExplorationSelection(selection?.value);
-      } else {
-        await sleep(3200);
-      }
+      const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
+      await handleExplorationSelection(selection?.value);
 
       setPlayerHandReveal(pid, false);
     }
@@ -2534,7 +2554,7 @@ function subscribeExplorationFaceEvent(){
     const now = Date.now();
     if (ev.at && (now - ev.at) > 20000) return;
 
-    runExplorationPhaseSequence();
+    runExplorationPhaseSequence(ev.id);
   });
 }
 
@@ -3267,6 +3287,19 @@ async function emitExplorationFaceEvent(){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/explorationFaceEvent`), { id, at: Date.now() });
+}
+
+async function emitExplorationPickEvent({ eventId, rank, playerId, value } = {}){
+  if (!state.roomCode) return;
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/explorationPickEvent`), {
+    id,
+    eventId: eventId || null,
+    rank: Number.isFinite(rank) ? rank : null,
+    playerId: playerId || null,
+    value: value ?? null,
+    at: Date.now(),
+  });
 }
 
 function shuffleInPlace(arr){
@@ -5590,6 +5623,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/returnTopEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/handTransferEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/explorationFaceEvent`), null),
+    set(ref(db, `rooms/${state.roomCode}/explorationPickEvent`), null),
 
     set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), null),
@@ -5644,6 +5678,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/xRevealEvent`)),
     remove(ref(db, `${base}/oneRevealEvent`)),
     remove(ref(db, `${base}/explorationFaceEvent`)),
+    remove(ref(db, `${base}/explorationPickEvent`)),
     remove(ref(db, `${base}/handTransferEvent`)),
   ]);
   state.seatedTable = null;
