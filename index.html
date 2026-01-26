@@ -388,6 +388,12 @@
     text-shadow:0 1px 2px rgba(255,255,255,.75);
     letter-spacing:0.08em;
   }
+  .card-title-number{
+    font-size:calc(var(--card-title-size, 12px) + 2px);
+  }
+  .card-title-name{
+    margin-block-start:0.25em;
+  }
   .card-reading{
     position:absolute;
     left:22%;
@@ -1219,7 +1225,15 @@ function setCardFace(el, value){
 
   const title = document.createElement('div');
   title.className = 'card-title';
-  title.textContent = `${displayNumber}\n${meta.name}`;
+  const numberEl = document.createElement('span');
+  numberEl.className = 'card-title-number';
+  numberEl.textContent = displayNumber;
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'card-title-name';
+  nameEl.textContent = meta.name;
+
+  title.append(numberEl, nameEl);
 
   const reading = document.createElement('div');
   reading.className = 'card-reading';
