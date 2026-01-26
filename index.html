@@ -723,14 +723,15 @@
     transform-origin:center bottom;
   }
   @keyframes xShake{
-    0%{ transform:translateY(0) scale(1.05) rotate(0deg); }
-    25%{ transform:translateY(0) scale(1.05) rotate(2deg); }
-    50%{ transform:translateY(0) scale(1.05) rotate(-2deg); }
-    75%{ transform:translateY(0) scale(1.05) rotate(1.5deg); }
-    100%{ transform:translateY(0) scale(1.05) rotate(0deg); }
+    0%{ transform:translateY(0) scale(1.06) rotate(0deg); }
+    20%{ transform:translateY(0) scale(1.06) rotate(4deg); }
+    40%{ transform:translateY(0) scale(1.06) rotate(-4deg); }
+    60%{ transform:translateY(0) scale(1.06) rotate(3deg); }
+    80%{ transform:translateY(0) scale(1.06) rotate(-3deg); }
+    100%{ transform:translateY(0) scale(1.06) rotate(0deg); }
   }
   .global-x-card.x-shake{
-    animation: xShake 120ms ease-in-out 2;
+    animation: xShake 360ms ease-in-out 1;
   }
   @keyframes xFallBack{
     0%{ transform:translateY(0) scale(1.05) rotateX(0deg); opacity:1; }
@@ -2911,6 +2912,12 @@ function getPlayerAnchorEl(playerId){
   return playerCircle.querySelector(`.player-anchor[data-pid="${playerId}"]`);
 }
 
+function getPlayerCardAnchorEl(playerId, cardIndex){
+  if (!playerId && playerId !== 0) return null;
+  if (!Number.isFinite(Number(cardIndex))) return null;
+  return playerCircle.querySelector(`.mini-card[data-pid="${playerId}"][data-idx="${cardIndex}"]`);
+}
+
 async function animateDrawFromDeckToPlayer(playerId){
   if (!deckPile) return;
 
@@ -3206,7 +3213,7 @@ async function animateGlobalXReveal(mode = 'effect38'){
     card.style.opacity = '1';
     await sleep(220);
     card.classList.add('x-shake');
-    await sleep(260);
+    await sleep(380);
     card.classList.remove('x-shake');
     card.classList.add('x-fall-back');
     await sleep(1000);
@@ -3216,7 +3223,7 @@ async function animateGlobalXReveal(mode = 'effect38'){
     card.style.transform = 'translateY(0) scale(1.05)';
     await sleep(460);
     card.classList.add('x-shake');
-    await sleep(300);
+    await sleep(380);
     card.classList.remove('x-shake');
     card.style.transition = 'opacity 240ms ease, transform 240ms ease';
     card.style.opacity = '0';
@@ -3675,6 +3682,8 @@ async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealing
     await sleep(1500);
     await emitHandTransferEvent(revealingPlayerId, targetPlayerId, null);
     await moveAllCardsToPlayer(revealingPlayerId, targetPlayerId);
+    await set(ref(db, `rooms/${state.roomCode}/eliminated/${revealingPlayerId}`), true);
+    state.eliminated = { ...(state.eliminated || {}), [revealingPlayerId]: true };
   }
 
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
@@ -3690,6 +3699,8 @@ async function resolveEffect4XReveal(targetPlayerId, cardIndex){
   await emitXRevealEvent('effect4');
   await sleep(2500);
   await discardHandToPlayed(targetPlayerId);
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
+  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
 
   await set(ref(db, `rooms/${state.roomCode}/effect4`), null);
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
@@ -4603,6 +4614,7 @@ function renderEffectArrowLayer(players){
 
   // ③/④のどちらかが「確定（confirm）」なら矢印候補
   let fromPid = null, toPid = null, show = false;
+  let targetCardIndex = null;
   let effectType = null;
 
   if (ef3 && (ef3.phase === 'confirm') && ef3.playerId && ef3.targetPlayerId){
@@ -4610,12 +4622,14 @@ function renderEffectArrowLayer(players){
     show = (state.userId !== ef3.playerId);
     fromPid = ef3.playerId;
     toPid = ef3.targetPlayerId;
+    targetCardIndex = ef3.targetCardIndex;
     effectType = '3';
   }
   if (ef4 && (ef4.phase === 'confirm') && ef4.playerId && ef4.targetPlayerId){
     show = (state.userId !== ef4.playerId);
     fromPid = ef4.playerId;
     toPid = ef4.targetPlayerId;
+    targetCardIndex = ef4.targetCardIndex;
     effectType = '4';
   }
   if (ef8 && (ef8.phase === 'return') && ef8.playerId && ef8.targetPlayerId){
@@ -4651,6 +4665,9 @@ function renderEffectArrowLayer(players){
   const line = document.createElementNS('http://www.w3.org/2000/svg','line');
   line.setAttribute('class','line');
   line.setAttribute('marker-end','url(#arrowHead)');
+  if (effectType === '8'){
+    line.setAttribute('marker-start','url(#arrowHead)');
+  }
   line.dataset.from = fromPid;
   line.dataset.to = toPid;
   svg.appendChild(line);
@@ -4669,7 +4686,9 @@ function renderEffectArrowLayer(players){
   // 次フレームで座標反映
   requestAnimationFrame(() => {
     const fromEl = getPlayerAnchorEl(fromPid);
-    const toEl   = getPlayerAnchorEl(toPid);
+    const toEl = (effectType === '3' || effectType === '4')
+      ? (getPlayerCardAnchorEl(toPid, targetCardIndex) || getPlayerAnchorEl(toPid))
+      : getPlayerAnchorEl(toPid);
     if (!fromEl || !toEl) return;
 
     const pc = playerCircle.getBoundingClientRect();
@@ -4767,7 +4786,7 @@ function renderPlayerCircle(players){
       const spread = 78;
       const base = (count > 1) ? (-spread/2) : 0;
 
-      const visibleCount = Math.max(1, Math.min(6, count || 1));
+      const visibleCount = Math.min(6, count);
       for(let i2=0;i2<visibleCount;i2++){
         const card = document.createElement('div');
         card.className = 'mini-card';
@@ -4777,12 +4796,12 @@ function renderPlayerCircle(players){
         card.style.transform = `translate(-50%,0) rotate(${angleDeg}deg)`;
         card.style.zIndex = String(10 + i2);
         card.dataset.value = String(handCards[i2] ?? '');
+        card.dataset.pid = p.id;
+        card.dataset.idx = String(i2);
 
         // ★③/④：使用者が選択中なら pickable
         if (pickMode && !isElim){
           card.classList.add('pickable');
-          card.dataset.pid = p.id;
-          card.dataset.idx = String(i2);
 
           // ここでカードを選ぶ（クリックしたカード番号を「そのまま index」として扱う）
           card.addEventListener('click', async (ev) => {
