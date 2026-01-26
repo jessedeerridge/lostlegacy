@@ -268,6 +268,10 @@
     transform:translate(-50%,-50%);
     opacity:1;
   }
+  .front-flyer.ruin-reveal-flyer{
+    transform-style:preserve-3d;
+    backface-visibility:hidden;
+  }
 
   .reshuffle-flyer{
     position:fixed;
@@ -603,6 +607,7 @@
   .ruins-card.pickable{
     pointer-events:auto;
     cursor:grab;
+    touch-action:none;
     animation: ruinsPulse 760ms ease-in-out infinite;
     outline:2px solid rgba(37,99,235,.0);
   }
@@ -1954,9 +1959,15 @@ function subscribeRuinMoveEvent(){
     const fromPid = ev.fromPlayerId;
     const cardValue = ev.cardValue;
     const slotIndex = Number(ev.slotIndex || 0);
+    const mode = ev.mode || null;
 
     if (!fromPid) return;
-    if (fromPid === state.userId) return;
+    if (fromPid === state.userId && mode !== 'oneReveal') return;
+
+    if (mode === 'oneReveal'){
+      animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
+      return;
+    }
 
     animateMoveFromPlayerToRuin(fromPid, String(cardValue ?? ''), slotIndex);
   });
@@ -2152,6 +2163,7 @@ function cleanupE7PickDrag({ keepSourceHidden = false } = {}){
   e7pickDrag.ghostEl = null;
   e7pickDrag.sourceEl = null;
   e7pickDrag.overHand = false;
+  removeRuinPickListeners();
   setHandDropActive(false);
   setHandDropHint(false);
 }
@@ -2526,6 +2538,32 @@ async function onCardPointerUp(e){
   try { cardEl.releasePointerCapture(e.pointerId); } catch {}
 }
 
+const ruinPickListeners = {
+  move: null,
+  up: null,
+  cancel: null,
+};
+
+function addRuinPickListeners(){
+  if (ruinPickListeners.move) return;
+  ruinPickListeners.move = (ev) => onRuinPointerMove(ev);
+  ruinPickListeners.up = (ev) => onRuinPointerUp(ev);
+  ruinPickListeners.cancel = (ev) => onRuinPointerUp(ev);
+  window.addEventListener('pointermove', ruinPickListeners.move, { passive:false });
+  window.addEventListener('pointerup', ruinPickListeners.up, { passive:false });
+  window.addEventListener('pointercancel', ruinPickListeners.cancel, { passive:false });
+}
+
+function removeRuinPickListeners(){
+  if (!ruinPickListeners.move) return;
+  window.removeEventListener('pointermove', ruinPickListeners.move);
+  window.removeEventListener('pointerup', ruinPickListeners.up);
+  window.removeEventListener('pointercancel', ruinPickListeners.cancel);
+  ruinPickListeners.move = null;
+  ruinPickListeners.up = null;
+  ruinPickListeners.cancel = null;
+}
+
 function onRuinPointerDown(e){
   const cardEl = e.currentTarget;
 
@@ -2541,9 +2579,7 @@ function onRuinPointerDown(e){
   e7pickDrag.slotIndex = slotIndex;
   e7pickDrag.pointerId = e.pointerId;
   e7pickDrag.overHand = false;
-
   e7pickDrag.sourceEl = cardEl;
-  cardEl.classList.add('drag-source-hidden');
 
   const ghost = document.createElement('div');
   ghost.className = 'drag-ghost';
@@ -2554,10 +2590,12 @@ function onRuinPointerDown(e){
   ghost.style.left = `${e.clientX}px`;
   ghost.style.top  = `${e.clientY}px`;
 
+  cardEl.classList.add('drag-source-hidden');
+
   setHandDropHint(true);
   setHandDropActive(false);
 
-  cardEl.setPointerCapture(e.pointerId);
+  addRuinPickListeners();
   e.preventDefault();
 }
 
@@ -2571,18 +2609,18 @@ function onRuinPointerMove(e){
   const over = isPointInRect(e.clientX, e.clientY, rect);
   e7pickDrag.overHand = over;
   setHandDropActive(over);
+  e.preventDefault();
 }
 
 async function onRuinPointerUp(e){
-  const cardEl = e.currentTarget;
-
   if (!e7pickDrag.active || e7pickDrag.pointerId !== e.pointerId) return;
 
   const slotIndex = e7pickDrag.slotIndex;
   const shouldDrop = e7pickDrag.overHand;
   cleanupE7PickDrag({ keepSourceHidden: shouldDrop });
-  try { cardEl.releasePointerCapture(e.pointerId); } catch {}
+  removeRuinPickListeners();
   if (shouldDrop) await handleEffect7Pick(slotIndex);
+  e.preventDefault();
 }
 
 function renderMyHand(){
@@ -2793,7 +2831,7 @@ async function emitReshuffleEvent(count){
   });
 }
 
-async function emitRuinMoveEvent(fromPlayerId, cardValue, slotIndex){
+async function emitRuinMoveEvent(fromPlayerId, cardValue, slotIndex, mode){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/ruinMoveEvent`), {
@@ -2801,6 +2839,7 @@ async function emitRuinMoveEvent(fromPlayerId, cardValue, slotIndex){
     fromPlayerId,
     cardValue: String(cardValue ?? ''),
     slotIndex: Number(slotIndex || 0),
+    mode: mode || null,
     at: Date.now()
   });
 }
@@ -3393,6 +3432,54 @@ async function animateMoveFromPlayerToRuin(playerId, cardValue, slotIndex){
   flyer.remove();
 }
 
+async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
+  const anchor = getPlayerAnchorEl(playerId);
+  let startX, startY;
+
+  if (anchor){
+    const sr = anchor.getBoundingClientRect();
+    startX = sr.left + sr.width/2;
+    startY = sr.top + sr.height/2;
+  } else {
+    const pc = playerCircle.getBoundingClientRect();
+    startX = pc.left + pc.width/2;
+    startY = pc.top + pc.height/2;
+  }
+
+  const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
+
+  const flyer = document.createElement('div');
+  flyer.className = 'front-flyer ruin-reveal-flyer';
+  flyer.textContent = String(cardValue ?? '');
+  flyer.style.left = `${startX}px`;
+  flyer.style.top  = `${startY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(0.9)';
+  document.body.appendChild(flyer);
+
+  await sleep(0);
+  flyer.style.transition = 'transform 120ms ease, top 120ms ease';
+  flyer.style.top = `${startY - 16}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-16deg) scale(1.0)';
+  await sleep(140);
+
+  flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
+  flyer.style.left = `${endX}px`;
+  flyer.style.top  = `${endY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.86)';
+  await sleep(440);
+
+  flyer.style.transition = 'transform 200ms ease, opacity 200ms ease, background 200ms ease, color 200ms ease';
+  flyer.style.transform = 'translate(-50%,-50%) rotateY(180deg) scale(0.72)';
+  flyer.style.background = 'linear-gradient(135deg,#e5e7eb,#cbd5f5)';
+  flyer.style.color = 'transparent';
+  flyer.style.opacity = '0.9';
+  await sleep(220);
+
+  flyer.style.opacity = '0';
+  await sleep(120);
+  flyer.remove();
+}
+
 async function animateReshufflePlayedToDeck(count){
   if (!deckPile) return;
 
@@ -3545,7 +3632,7 @@ async function addCardToPlayed(playerId, cardValue){
   }, { applyLocally:false });
 }
 
-async function placeCardIntoRuins(playerId, cardValue){
+async function placeCardIntoRuins(playerId, cardValue, { skipEvent = false, eventMode = null } = {}){
   if (!state.roomCode) return null;
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   let slotIndex = null;
@@ -3565,7 +3652,9 @@ async function placeCardIntoRuins(playerId, cardValue){
   }, { applyLocally:false });
 
   if (res.committed && slotIndex !== null){
-    await emitRuinMoveEvent(playerId, cardValue, slotIndex);
+    if (!skipEvent){
+      await emitRuinMoveEvent(playerId, cardValue, slotIndex, eventMode);
+    }
   }
 
   return slotIndex;
@@ -3606,7 +3695,10 @@ async function resolveOneReveal(targetPlayerId, cardIndex, removedValue){
     await sleep(220);
   }
   if (value != null){
-    await placeCardIntoRuins(targetPlayerId, value);
+    const slotIndex = await placeCardIntoRuins(targetPlayerId, value, { skipEvent:true });
+    if (slotIndex !== null){
+      await emitRuinMoveEvent(targetPlayerId, value, slotIndex, 'oneReveal');
+    }
   }
 
   await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
@@ -4610,83 +4702,83 @@ function renderEffectArrowLayer(players){
   const ef4 = state.effect4;
   const ef8 = state.effect8;
 
-  // ③/④のどちらかが「確定（confirm）」なら矢印候補
-  let fromPid = null, toPid = null, show = false;
-  let targetCardIndex = null;
-  let effectType = null;
+  let config = null;
 
-  if (ef3 && (ef3.phase === 'confirm') && ef3.playerId && ef3.targetPlayerId){
-    // 使用者以外の画面で表示
-    show = (state.userId !== ef3.playerId);
-    fromPid = ef3.playerId;
-    toPid = ef3.targetPlayerId;
-    targetCardIndex = ef3.targetCardIndex;
-    effectType = '3';
-  }
-  if (ef4 && (ef4.phase === 'confirm') && ef4.playerId && ef4.targetPlayerId){
-    show = (state.userId !== ef4.playerId);
-    fromPid = ef4.playerId;
-    toPid = ef4.targetPlayerId;
-    targetCardIndex = ef4.targetCardIndex;
-    effectType = '4';
-  }
-  if (ef8 && (ef8.phase === 'return') && ef8.playerId && ef8.targetPlayerId){
-    show = (state.userId !== ef8.playerId);
-    fromPid = ef8.playerId;
-    toPid = ef8.targetPlayerId;
-    effectType = '8';
+  if (ef3 && ef3.phase === 'confirm' && ef3.playerId && ef3.targetPlayerId){
+    config = {
+      fromPid: ef3.playerId,
+      toPid: ef3.targetPlayerId,
+      targetCardIndex: ef3.targetCardIndex,
+      showEye: true,
+      bothEnds: false,
+      show: state.userId !== ef3.playerId,
+    };
+  } else if (ef4 && ef4.phase === 'confirm' && ef4.playerId && ef4.targetPlayerId){
+    config = {
+      fromPid: ef4.playerId,
+      toPid: ef4.targetPlayerId,
+      targetCardIndex: ef4.targetCardIndex,
+      showEye: true,
+      bothEnds: false,
+      show: state.userId !== ef4.playerId,
+    };
+  } else if (ef8 && ef8.phase === 'return' && ef8.playerId && ef8.targetPlayerId){
+    config = {
+      fromPid: ef8.playerId,
+      toPid: ef8.targetPlayerId,
+      targetCardIndex: null,
+      showEye: false,
+      bothEnds: true,
+      show: state.userId !== ef8.playerId,
+    };
   }
 
-  if (!show){
+  if (!config || !config.show){
     return layer;
   }
 
-  // SVG描画（位置は後で計算）
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.setAttribute('viewBox','0 0 260 260');
 
   const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
   const marker = document.createElementNS('http://www.w3.org/2000/svg','marker');
-  marker.setAttribute('id','arrowHead');
-  marker.setAttribute('markerWidth','10');
-  marker.setAttribute('markerHeight','10');
-  marker.setAttribute('refX','8');
-  marker.setAttribute('refY','5');
-  marker.setAttribute('orient','auto');
+  const markerId = `arrowHead-${Math.random().toString(16).slice(2)}`;
+  marker.setAttribute('id', markerId);
+  marker.setAttribute('markerWidth', '10');
+  marker.setAttribute('markerHeight', '10');
+  marker.setAttribute('refX', '8');
+  marker.setAttribute('refY', '5');
+  marker.setAttribute('orient', 'auto');
   const path = document.createElementNS('http://www.w3.org/2000/svg','path');
-  path.setAttribute('d','M0,0 L10,5 L0,10 Z');
-  path.setAttribute('class','head');
+  path.setAttribute('d', 'M0,0 L10,5 L0,10 Z');
+  path.setAttribute('class', 'head');
   marker.appendChild(path);
   defs.appendChild(marker);
   svg.appendChild(defs);
 
   const line = document.createElementNS('http://www.w3.org/2000/svg','line');
-  line.setAttribute('class','line');
-  line.setAttribute('marker-end','url(#arrowHead)');
-  if (effectType === '8'){
-    line.setAttribute('marker-start','url(#arrowHead)');
+  line.setAttribute('class', 'line');
+  line.setAttribute('marker-end', `url(#${markerId})`);
+  if (config.bothEnds){
+    line.setAttribute('marker-start', `url(#${markerId})`);
   }
-  line.dataset.from = fromPid;
-  line.dataset.to = toPid;
   svg.appendChild(line);
 
-  const showEye = effectType === '3' || effectType === '4';
   let eye = null;
-  if (showEye){
+  if (config.showEye){
     eye = document.createElementNS('http://www.w3.org/2000/svg','text');
-    eye.setAttribute('class','eye');
+    eye.setAttribute('class', 'eye');
     eye.textContent = '👀';
     svg.appendChild(eye);
   }
 
   layer.appendChild(svg);
 
-  // 次フレームで座標反映
   requestAnimationFrame(() => {
-    const fromEl = getPlayerAnchorEl(fromPid);
-    const toEl = (effectType === '3' || effectType === '4')
-      ? (getPlayerCardAnchorEl(toPid, targetCardIndex) || getPlayerAnchorEl(toPid))
-      : getPlayerAnchorEl(toPid);
+    const fromEl = getPlayerAnchorEl(config.fromPid);
+    const toEl = config.showEye
+      ? (getPlayerCardAnchorEl(config.toPid, config.targetCardIndex) || getPlayerAnchorEl(config.toPid))
+      : getPlayerAnchorEl(config.toPid);
     if (!fromEl || !toEl) return;
 
     const pc = playerCircle.getBoundingClientRect();
@@ -4698,7 +4790,6 @@ function renderEffectArrowLayer(players){
     const tx = (tr.left + tr.width/2) - pc.left;
     const ty = (tr.top  + tr.height/2) - pc.top;
 
-    // playerCircleは260x260固定なので、そのままOK
     line.setAttribute('x1', String(fx));
     line.setAttribute('y1', String(fy));
     line.setAttribute('x2', String(tx));
