@@ -441,13 +441,15 @@
     border:none;
     background:transparent;
     display:flex;
-    align-items:center;
-    justify-content:center;
-    text-align:center;
+    align-items:flex-start;
+    justify-content:flex-start;
+    text-align:left;
     padding:2px 3px;
     overflow:hidden;
   }
   .card-effect-text{
+    display:block;
+    width:100%;
     font-weight:700;
     color:#111;
     line-height:1.1;
@@ -1267,7 +1269,7 @@ function getCardEffectText(value){
     case '3':
       return '他プレイヤーの手札か遺跡1枚を見て、《失われた遺産》なら勝利。';
     case '4':
-      return '他プレイヤーの手札を見て、×なら効果を無効にしてそのプレイヤーは脱落。';
+      return '他プレイヤーの手札を見て、×ならそのプレイヤーがあなたの手札を奪う。';
     case '5':
       return 'このカードはプレイできない。';
     case '6':
@@ -1276,6 +1278,8 @@ function getCardEffectText(value){
       return '遺跡1枚を見て、手札と交換してもよい。';
     case '8':
       return '他プレイヤーの手札を見て、手札と交換してもよい。';
+    case 'x':
+      return '手札にあるこのカードを見られた時、これを捨て札に置き、見たプレイヤーの手札を奪う。';
     default:
       return '';
   }
@@ -1301,7 +1305,7 @@ function getCardDecorCount(value){
   }
 }
 
-function fitTextToBox(container, textEl, { minSize = 6, maxSize = 10 } = {}){
+function fitTextToBox(container, textEl, { minSize = 4, maxSize = 10 } = {}){
   const text = textEl.textContent || '';
   if (!text) return;
 
@@ -1312,7 +1316,9 @@ function fitTextToBox(container, textEl, { minSize = 6, maxSize = 10 } = {}){
     return;
   }
 
-  let size = maxSize;
+  const maxByHeight = Math.floor(rect.height * 0.6);
+  const maxByWidth = Math.floor(rect.width * 0.28);
+  let size = Math.min(maxSize, Math.max(minSize, maxByHeight, maxByWidth));
   textEl.style.fontSize = `${size}px`;
 
   for (let i = 0; i < 24; i++){
@@ -1373,8 +1379,15 @@ function setCardFace(el, value){
   effectText.textContent = getCardEffectText(key);
   decorRight.appendChild(effectText);
   requestAnimationFrame(() => {
-    fitTextToBox(decorRight, effectText, { minSize: 6, maxSize: 10 });
+    fitTextToBox(decorRight, effectText, { minSize: 4, maxSize: 10 });
   });
+  if (!decorRight._fitObserver && 'ResizeObserver' in window){
+    const ro = new ResizeObserver(() => {
+      fitTextToBox(decorRight, effectText, { minSize: 4, maxSize: 10 });
+    });
+    ro.observe(decorRight);
+    decorRight._fitObserver = ro;
+  }
 
   overlay.appendChild(title);
   overlay.appendChild(decorLeft);
@@ -1506,12 +1519,12 @@ const ROLE_HELP = [
   { name: "（1）", text: "プレイしても何も起きない。③/④/⑧で見られた場合、③/④/⑧効果を消して、全員に1を拡大表示→この1を空いている遺跡へ順番に自動配置→所有者は脱落（以後手番スキップ＆ドローなし）。" },
   { name: "（2）", text: "追加で1枚ドロー（全員に裏で移動可視）→ 手札全て大小 → 1枚選んで青枠 → 山札の一番上へ戻す（全員に裏で移動可視）" },
   { name: "（3）", text: "他プレイヤーの扇カードが大小アニメ。1枚選ぶと、使用者以外の画面では使用者→対象へ点線矢印。使用者だけ選んだカードを拡大表示。下に水色ポップ「閉じてもいいですか」→はいで次のターン。※見たカードが5なら全員で5演出→ゲーム終了（全員停止）。" },
-  { name: "（4）", text: "他プレイヤーの扇カードが大小アニメ。1枚選ぶと、使用者以外の画面では使用者→対象へ点線矢印。使用者だけ拡大表示。下にポップ→はいで次ターン。※見たカードが✕なら全員で✕拡大→倒れる演出→✕の所有者は脱落（手番スキップ＆ドローなし）。" },
+  { name: "（4）", text: "他プレイヤーの扇カードが大小アニメ。1枚選ぶと、使用者以外の画面では使用者→対象へ点線矢印。使用者だけ拡大表示。下にポップ→はいで次ターン。※見たカードが✕なら全員で✕拡大→倒れる演出→✕所有者がこのカードを捨て札へ置き、④使用者の手札を奪って④使用者は脱落（以後手番スキップ＆ドローなし）。" },
   { name: "（5）", text: "（効果説明をここに）" },
   { name: "（6）", text: "追加で1枚ドロー → 手札大小 → 1枚をドラッグして遺跡(2x3順番)へ配置" },
   { name: "（7）", text: "遺跡カード全て大小 → 1枚選んで手札へ → 手札大小＆ドラッグ → 空いた遺跡スロットへ配置" },
   { name: "（8）", text: "他プレイヤーの扇カードが大小アニメ → 1枚選ぶと点線矢印表示 → そのカードが自分の手札へ移動 → 自分の手札が大小＆ドラッグ可 → さっき選んだ相手にドラッグで渡す（他プレイヤーには裏向き移動表示）" },
-  { name: "（x）", text: "プレイしても何も起きない。③/④/⑧で見られた場合、全員に✕を拡大表示→✕カードを所有者の捨て札へ。③/⑧時は③/⑧プレイ者の手札を✕所有者へ移動し、③/⑧プレイ者は脱落（以後手番スキップ＆ドローなし）。④時は✕所有者が脱落。" },
+  { name: "（x）", text: "プレイしても何も起きない。③/④/⑧で見られた場合、全員に✕を拡大表示→✕カードを所有者の捨て札へ。③/④/⑧プレイ者の手札を✕所有者へ移動し、③/④/⑧プレイ者は脱落（以後手番スキップ＆ドローなし）。" },
 ];
 
 function renderHelpList(){
@@ -4089,7 +4102,7 @@ async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealing
   await advanceTurnToNextPlayer();
 }
 
-async function resolveEffect4XReveal(targetPlayerId, cardIndex){
+async function resolveEffect4XReveal(targetPlayerId, cardIndex, revealingPlayerId){
   if (!state.roomCode || !targetPlayerId) return;
 
   hidePeekCard();
@@ -4097,9 +4110,17 @@ async function resolveEffect4XReveal(targetPlayerId, cardIndex){
 
   await emitXRevealEvent('effect4');
   await sleep(2500);
-  await discardHandToPlayed(targetPlayerId);
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
-  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
+  let value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
+  if (value != null){
+    await addCardToPlayed(targetPlayerId, value);
+  }
+  if (revealingPlayerId){
+    await sleep(1500);
+    await emitHandTransferEvent(revealingPlayerId, targetPlayerId, null);
+    await moveAllCardsToPlayer(revealingPlayerId, targetPlayerId);
+    await set(ref(db, `rooms/${state.roomCode}/eliminated/${revealingPlayerId}`), true);
+    state.eliminated = { ...(state.eliminated || {}), [revealingPlayerId]: true };
+  }
 
   await set(ref(db, `rooms/${state.roomCode}/effect4`), null);
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
@@ -4378,7 +4399,7 @@ async function handleEffect4Pick(targetPlayerId, cardIndex){
       targetCardIndex: idx,
       revealed
     });
-    await resolveEffect4XReveal(targetPlayerId, idx);
+    await resolveEffect4XReveal(targetPlayerId, idx, state.userId);
     return;
   }
 
