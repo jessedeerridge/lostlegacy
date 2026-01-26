@@ -1101,6 +1101,12 @@
     font-size:14px;
   }
   .mini-card.exploration-front{
+    width:42px;
+    height:62px;
+    top:0;
+    border-radius:10px;
+    --card-title-size:7.6px;
+    --card-reading-size:6.4px;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -1110,10 +1116,10 @@
   }
 
   @keyframes explorationFlip{
-    0%{ transform:rotateY(0deg) rotateZ(0deg); }
-    40%{ transform:rotateY(180deg) rotateZ(90deg); color:transparent; background-image:var(--card-back-image); background-color:#fff; background-size:cover; background-position:center; }
-    70%{ transform:rotateY(260deg) rotateZ(180deg); }
-    100%{ transform:rotateY(360deg) rotateZ(360deg); color:#111; background:#fff; }
+    0%{ transform:rotateY(0deg); color:#111; background:#fff; }
+    45%{ transform:rotateY(90deg); color:transparent; background-image:var(--card-back-image); background-color:#fff; background-size:cover; background-position:center; }
+    55%{ transform:rotateY(90deg); color:transparent; background-image:var(--card-back-image); }
+    100%{ transform:rotateY(0deg); color:#111; background:#fff; }
   }
   .my-hand-row.exploration-flip .my-card{
     animation: explorationFlip 900ms ease-in-out 1;
@@ -1786,6 +1792,42 @@ async function showExplorationFace(){
 let explorationSequenceActive = false;
 let explorationSelectionCleanup = null;
 let explorationSelectionTimer = null;
+const explorationRevealState = {
+  players: new Map(),
+  ruins: new Map(),
+};
+
+function markExplorationRevealedHand(playerId, cardIndex, value){
+  if (!playerId || !Number.isFinite(Number(cardIndex))) return;
+  const existing = explorationRevealState.players.get(playerId) || new Map();
+  existing.set(Number(cardIndex), value ?? null);
+  explorationRevealState.players.set(playerId, existing);
+}
+
+function clearExplorationRevealedHand(playerId){
+  if (!playerId) return;
+  explorationRevealState.players.delete(playerId);
+}
+
+function clearExplorationRevealedHandIndex(playerId, cardIndex){
+  if (!playerId || !Number.isFinite(Number(cardIndex))) return;
+  const existing = explorationRevealState.players.get(playerId);
+  if (!existing) return;
+  existing.delete(Number(cardIndex));
+  if (!existing.size){
+    explorationRevealState.players.delete(playerId);
+  }
+}
+
+function markExplorationRevealedRuin(ruinIndex, value){
+  if (!Number.isFinite(Number(ruinIndex))) return;
+  explorationRevealState.ruins.set(Number(ruinIndex), value ?? null);
+}
+
+function clearExplorationRevealedRuin(ruinIndex){
+  if (!Number.isFinite(Number(ruinIndex))) return;
+  explorationRevealState.ruins.delete(Number(ruinIndex));
+}
 let tempArrowConfig = null;
 let lastSurvivorTimer = null;
 let pendingXRevealTarget = null;
@@ -1892,8 +1934,12 @@ function setPlayerHandReveal(playerId, active, { flip = false, keepFront = false
   fan.classList.toggle('exploration-reveal', active);
   const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
   const miniCards = fan.querySelectorAll('.mini-card');
+  if (!active && !keepFront){
+    clearExplorationRevealedHand(playerId);
+  }
   miniCards.forEach((card, idx) => {
     if (active){
+      markExplorationRevealedHand(playerId, idx, cards[idx]);
       card.classList.add('exploration-front');
       setCardFace(card, cards[idx]);
       if (wasActive){
@@ -2035,6 +2081,11 @@ function setExplorationTieShake(playerId, active){
 
 function revealExplorationCardFront(el, value){
   if (!el) return;
+  if (el.classList.contains('ruins-card')){
+    markExplorationRevealedRuin(Number(el.dataset.i), value);
+  } else if (el.classList.contains('mini-card')){
+    markExplorationRevealedHand(el.dataset.pid, Number(el.dataset.idx), value);
+  }
   el.classList.add('exploration-front');
   setCardFace(el, value);
 }
@@ -2044,6 +2095,11 @@ function clearExplorationPickedCard({ keepFront = false } = {}){
   if (!picked.length) return;
   picked.forEach((el) => {
     if (!keepFront){
+      if (el.classList.contains('ruins-card')){
+        clearExplorationRevealedRuin(Number(el.dataset.i));
+      } else if (el.classList.contains('mini-card')){
+        clearExplorationRevealedHandIndex(el.dataset.pid, el.dataset.idx);
+      }
       el.classList.remove('exploration-front');
       clearCardFaceVisual(el);
     }
@@ -5718,6 +5774,12 @@ function renderRuinsArea(){
     card.dataset.value = String(item?.v ?? item ?? '');
     card.textContent = '';
 
+    const revealedValue = explorationRevealState.ruins.get(i);
+    if (revealedValue != null && String(revealedValue) === String(item)){
+      card.classList.add('exploration-front');
+      setCardFace(card, item);
+    }
+
     if (mine7Picking){
       card.classList.add('pickable');
       card.addEventListener('pointerdown', onRuinPointerDown);
@@ -5978,6 +6040,13 @@ function renderPlayerCircle(players){
         card.dataset.pid = p.id;
         card.dataset.idx = String(i2);
 
+        const revealedIndexes = explorationRevealState.players.get(p.id);
+        const revealedValue = revealedIndexes ? revealedIndexes.get(i2) : null;
+        if (revealedValue != null && handCards[i2] != null && String(revealedValue) === String(handCards[i2])){
+          card.classList.add('exploration-front');
+          setCardFace(card, handCards[i2]);
+        }
+
         // ★③/④：使用者が選択中なら pickable
         if (pickMode && !isElim){
           card.classList.add('pickable');
@@ -6084,7 +6153,7 @@ function renderPlayerCircle(players){
 function buildDeckForPlayers(playerCount){
   return [
     1,2,3,4,5,
-    "x","x","x"
+    "x"
   ];
 }
 
