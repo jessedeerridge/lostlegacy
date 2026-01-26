@@ -1792,6 +1792,7 @@ async function showExplorationFace(){
 let explorationSequenceActive = false;
 let explorationSelectionCleanup = null;
 let explorationSelectionTimer = null;
+let explorationStopRequested = false;
 const explorationRevealState = {
   players: new Map(),
   ruins: new Map(),
@@ -1827,6 +1828,23 @@ function markExplorationRevealedRuin(ruinIndex, value){
 function clearExplorationRevealedRuin(ruinIndex){
   if (!Number.isFinite(Number(ruinIndex))) return;
   explorationRevealState.ruins.delete(Number(ruinIndex));
+}
+
+function resetExplorationState({ render = true } = {}){
+  explorationSequenceActive = false;
+  explorationStopRequested = false;
+  cleanupExplorationSelection();
+  explorationRevealState.players.clear();
+  explorationRevealState.ruins.clear();
+  if (myHandRow){
+    myHandRow.classList.remove('exploration-reveal', 'exploration-flip', 'exploration-shake', 'exploration-tie-shake');
+  }
+  if (playerCircle){
+    playerCircle.querySelectorAll('.player-fan').forEach((fan) => {
+      fan.classList.remove('exploration-reveal', 'exploration-shake', 'exploration-tie-shake');
+    });
+  }
+  if (render) renderHands();
 }
 let tempArrowConfig = null;
 let lastSurvivorTimer = null;
@@ -1870,9 +1888,16 @@ function getAlivePlayers(){
   return latestPlayers.filter(p => !state.eliminated?.[p.id]);
 }
 
+function isGameStarted(){
+  const hasTurn = !!state.turn?.currentPlayerId;
+  const hasHands = Object.keys(state.hands || {}).length > 0;
+  return hasTurn && hasHands;
+}
+
 async function maybeDeclareLastSurvivor(){
   if (!state.isHost || !state.roomCode) return;
   if (state.gameOver) return;
+  if (!isGameStarted()) return;
   const alive = getAlivePlayers();
   if (alive.length !== 1) return;
 
@@ -1894,6 +1919,7 @@ function scheduleLastSurvivorCheck(){
     lastSurvivorTimer = null;
   }
   if (!state.isHost || state.gameOver) return;
+  if (!isGameStarted()) return;
   const alive = getAlivePlayers();
   if (alive.length !== 1) return;
   lastSurvivorTimer = setTimeout(async () => {
@@ -2116,6 +2142,32 @@ function cleanupExplorationSelection(){
   }
 }
 
+function revealExplorationPickFromEvent(ev){
+  if (!ev) return null;
+  if (!playerCircle) return null;
+  const value = ev.value;
+  let el = null;
+
+  if (ev.sourceType === 'ruin' && Number.isFinite(Number(ev.sourceRuinIndex))){
+    el = playerCircle.querySelector(`.ruins-card[data-i="${Number(ev.sourceRuinIndex)}"]`);
+  } else if (ev.sourceType === 'hand' && ev.sourcePlayerId && Number.isFinite(Number(ev.sourceCardIndex))){
+    el = playerCircle.querySelector(`.mini-card[data-pid="${ev.sourcePlayerId}"][data-idx="${Number(ev.sourceCardIndex)}"]`);
+  }
+
+  if (!el && value != null){
+    const valueStr = String(value);
+    el = playerCircle.querySelector(`.ruins-card[data-value="${valueStr}"]:not(.exploration-front)`)
+      || playerCircle.querySelector(`.mini-card[data-value="${valueStr}"]:not(.exploration-front)`);
+  }
+
+  if (el && value != null){
+    el.classList.add('exploration-picked');
+    revealExplorationCardFront(el, value);
+  }
+
+  return el;
+}
+
 function waitForExplorationPickEvent({ eventId, rank, playerId } = {}){
   if (!state.roomCode) return Promise.resolve(null);
   return new Promise((resolve) => {
@@ -2126,6 +2178,7 @@ function waitForExplorationPickEvent({ eventId, rank, playerId } = {}){
       if (eventId && ev.eventId !== eventId) return;
       if (Number.isFinite(rank) && ev.rank !== rank) return;
       if (playerId && ev.playerId !== playerId) return;
+      revealExplorationPickFromEvent(ev);
       unsubscribe();
       resolve(ev);
     });
@@ -2165,6 +2218,10 @@ function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
         rank,
         playerId: state.userId,
         value: selection?.value ?? null,
+        sourceType: selection?.sourceType ?? null,
+        sourcePlayerId: selection?.sourcePlayerId ?? null,
+        sourceCardIndex: selection?.sourceCardIndex ?? null,
+        sourceRuinIndex: selection?.sourceRuinIndex ?? null,
       });
       resolve({ ...selection, playerId: state.userId });
     };
@@ -2185,7 +2242,16 @@ function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
         const value = el.dataset.value;
         el.classList.add('exploration-picked');
         revealExplorationCardFront(el, value);
-        finalize({ value });
+        const selection = { value };
+        if (el.classList.contains('ruins-card')){
+          selection.sourceType = 'ruin';
+          selection.sourceRuinIndex = Number(el.dataset.i);
+        } else if (el.classList.contains('mini-card')){
+          selection.sourceType = 'hand';
+          selection.sourcePlayerId = el.dataset.pid;
+          selection.sourceCardIndex = Number(el.dataset.idx);
+        }
+        finalize(selection);
       };
       el.addEventListener('click', handler, { once:true });
       listeners.push({ el, handler });
@@ -2214,6 +2280,7 @@ async function animateExplorationCenterDrop(value){
 async function handleExplorationSelection(value, { keepFront = false, explorerId = null } = {}){
   if (!value) return;
   if (String(value) === '5'){
+    explorationStopRequested = true;
     await triggerFiveSlideSequence(explorerId);
     if (state.isHost && !state.gameOver){
       await setGameOverFoundFive(explorerId);
@@ -2228,6 +2295,7 @@ async function handleExplorationSelection(value, { keepFront = false, explorerId
 async function runExplorationPhaseSequence(eventId){
   if (explorationSequenceActive) return;
   explorationSequenceActive = true;
+  explorationStopRequested = false;
   const revealedPlayers = new Set();
 
   try{
@@ -2236,6 +2304,7 @@ async function runExplorationPhaseSequence(eventId){
 
     const groups = getExplorationGroups();
     for (const group of groups){
+      if (explorationStopRequested || state.gameOver) return;
       if (!group.players.length) continue;
 
       group.players.forEach((pid) => {
@@ -2266,7 +2335,7 @@ async function runExplorationPhaseSequence(eventId){
 
       const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
       await handleExplorationSelection(selection?.value, { keepFront: true, explorerId: selection?.playerId || pid });
-      if (state.gameOver) return;
+      if (state.gameOver || explorationStopRequested) return;
     }
   } finally {
     revealedPlayers.forEach((pid) => setPlayerHandReveal(pid, false, { keepFront: true }));
@@ -2281,6 +2350,7 @@ let latestPlayers = [];
 let prevIsMyTurn = false;
 let autoDrawInFlight = false;
 let autoSkipInFlight = false;
+let prevTurnSeq = null;
 
 let prevMyCardsSig = null;
 
@@ -2487,6 +2557,10 @@ function subscribeGameOver(){
       clearTimeout(lastSurvivorTimer);
       lastSurvivorTimer = null;
     }
+    if (state.gameOver){
+      explorationStopRequested = true;
+      cleanupExplorationSelection();
+    }
     updateTurnUI();
   });
 }
@@ -2645,9 +2719,17 @@ function subscribeTurn(){
   const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
   onValue(turnRef, async snap => {
     const t = snap.val() || {};
+    const nextTurnSeq = Number(t.turnSeq || 0);
+    const nextTurnPlayerId = t.currentPlayerId || null;
+
+    if ((nextTurnSeq === 1 && prevTurnSeq !== 1) || (nextTurnSeq === 0 && prevTurnSeq && prevTurnSeq !== 0)){
+      resetExplorationState();
+    }
+    prevTurnSeq = nextTurnSeq;
+
     state.turn = {
-      currentPlayerId: t.currentPlayerId || null,
-      turnSeq: Number(t.turnSeq || 0),
+      currentPlayerId: nextTurnPlayerId,
+      turnSeq: nextTurnSeq,
       drawn: !!t.drawn,
       paused: !!t.paused
     };
@@ -3670,7 +3752,7 @@ async function emitExplorationFaceEvent(){
   await set(ref(db, `rooms/${state.roomCode}/explorationFaceEvent`), { id, at: Date.now() });
 }
 
-async function emitExplorationPickEvent({ eventId, rank, playerId, value } = {}){
+async function emitExplorationPickEvent({ eventId, rank, playerId, value, sourceType, sourcePlayerId, sourceCardIndex, sourceRuinIndex } = {}){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/explorationPickEvent`), {
@@ -3679,6 +3761,10 @@ async function emitExplorationPickEvent({ eventId, rank, playerId, value } = {})
     rank: Number.isFinite(rank) ? rank : null,
     playerId: playerId || null,
     value: value ?? null,
+    sourceType: sourceType || null,
+    sourcePlayerId: sourcePlayerId || null,
+    sourceCardIndex: Number.isFinite(Number(sourceCardIndex)) ? Number(sourceCardIndex) : null,
+    sourceRuinIndex: Number.isFinite(Number(sourceRuinIndex)) ? Number(sourceRuinIndex) : null,
     at: Date.now(),
   });
 }
@@ -6162,6 +6248,8 @@ function toDisplayValue(v){ return String(v); }
 async function dealAllCardsAndInitialDraw(){
   if (!state.roomCode) return;
 
+  resetExplorationState({ render:false });
+
   const tablesSnap = await get(ref(db, `rooms/${state.roomCode}/tables`));
   const tables = tablesSnap.val() || {};
   const players = Object.entries(tables)
@@ -6272,6 +6360,7 @@ btnResetRoom.addEventListener('click', async () => {
   ]);
   state.seatedTable = null;
   startPop.classList.add('hidden');
+  resetExplorationState();
   await syncSeatUI();
 });
 </script>
