@@ -11,6 +11,8 @@
     --card-back-image: url('lrura.jpg');
     --ruin-scale-my: 0.64;
     --ruin-scale-mini: 1.75;
+    --card-large-title-size: 22px;
+    --card-large-reading-size: 16px;
   }
   html, body{height:100%; overflow:hidden;}
   body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#fff;color:#111;}
@@ -456,8 +458,8 @@
   .card-decor-right{
     position:absolute;
     top:4%;
-    right:4%;
-    width:65%;
+    right:var(--decor-right-offset, 4%);
+    width:var(--decor-right-width, 65%);
     height:28%;
     border-radius:6px;
     border:none;
@@ -469,13 +471,21 @@
     padding:2px 3px;
     overflow:hidden;
   }
-  .played-card .card-decor-right{
-    right:0%;
-    width:70%;
+  .played-card{
+    --decor-right-offset: -1%;
+    --decor-right-width: 70%;
   }
-  .my-card .card-decor-right{
-    right:0%;
-    width:70%;
+  .my-card{
+    --decor-right-offset: 0%;
+    --decor-right-width: 70%;
+  }
+  .ruins-card{
+    --decor-right-offset: 2%;
+  }
+  .mini-card.one-reveal-target,
+  .mini-card.x-reveal-target,
+  .mini-card.exploration-picked{
+    --decor-right-offset: 2%;
   }
   .card-effect-text{
     display:block;
@@ -834,8 +844,8 @@
     transform: rotate(-2deg);
     position:relative;
     overflow:hidden;
-    --card-title-size:20px;
-    --card-reading-size:14px;
+    --card-title-size:var(--card-large-title-size);
+    --card-reading-size:var(--card-large-reading-size);
   }
 
   /* 画面下：水色ポップ（閉じてもいいですか／はい） */
@@ -879,8 +889,8 @@
     will-change:transform,left,opacity;
     pointer-events:none;
     overflow:hidden;
-    --card-title-size:22px;
-    --card-reading-size:16px;
+    --card-title-size:var(--card-large-title-size);
+    --card-reading-size:var(--card-large-reading-size);
     opacity:0;
   }
   @keyframes fiveSlideMotion{
@@ -924,8 +934,8 @@
     transform-origin:center bottom;
     position:relative;
     overflow:hidden;
-    --card-title-size:24px;
-    --card-reading-size:16px;
+    --card-title-size:var(--card-large-title-size);
+    --card-reading-size:var(--card-large-reading-size);
   }
   @keyframes xShake{
     0%{ transform:translateY(0) scale(1.06) rotate(0deg); }
@@ -972,8 +982,8 @@
     animation: onePulse 1500ms ease-in-out 1;
     position:relative;
     overflow:hidden;
-    --card-title-size:24px;
-    --card-reading-size:16px;
+    --card-title-size:var(--card-large-title-size);
+    --card-reading-size:var(--card-large-reading-size);
   }
 
   .player-fan.one-reveal{
@@ -1049,6 +1059,7 @@
     white-space:nowrap;
     font-size:17px;
     line-height:1.4;
+    font-weight:800;
   }
   .gameover-pop.found5{ pointer-events:none; }
   .gameover-box{
@@ -1223,8 +1234,8 @@
     background:#fff;
     box-shadow:0 22px 56px rgba(0,0,0,.35);
     display:block;
-    --card-title-size:16px;
-    --card-reading-size:12px;
+    --card-title-size:var(--card-large-title-size);
+    --card-reading-size:var(--card-large-reading-size);
     transform:translate(-50%,-50%) scale(1.12);
     opacity:0;
     z-index:998;
@@ -1550,10 +1561,18 @@ function setCardFace(el, value){
   const isLargeFace = el.classList.contains('peek-card')
     || el.classList.contains('exploration-center-card')
     || el.classList.contains('global-x-card')
-    || el.classList.contains('global-one-card');
-  const fitOptions = el.classList.contains('played-card')
+    || el.classList.contains('global-one-card')
+    || el.classList.contains('global-slide-card');
+  const isPlayedFace = el.classList.contains('played-card');
+  const isCompactFace = el.classList.contains('ruins-card') || el.classList.contains('mini-card');
+  const isMiniZoom = el.classList.contains('one-reveal-target')
+    || el.classList.contains('x-reveal-target')
+    || el.classList.contains('exploration-picked');
+  const fitOptions = isPlayedFace
     ? { minSize: 3, maxSize: 9 }
-    : (isLargeFace ? { minSize: 10, maxSize: 12 } : { minSize: 4, maxSize: 10 });
+    : (isLargeFace ? { minSize: 12, maxSize: 16 }
+      : (isMiniZoom ? { minSize: 4, maxSize: 9 }
+        : (isCompactFace ? { minSize: 3, maxSize: 8 } : { minSize: 4, maxSize: 10 })));
   requestAnimationFrame(() => {
     fitTextToBox(decorRight, effectText, fitOptions);
   });
@@ -3565,6 +3584,13 @@ function renderMyHand(){
   const myId = state.userId;
   const handData = state.hands[myId];
   let cards = Array.isArray(handData?.cards) ? handData.cards : [];
+  let prevCards = null;
+  if (prevMyCardsSig !== null){
+    try{
+      const parsed = JSON.parse(prevMyCardsSig);
+      if (Array.isArray(parsed)) prevCards = parsed;
+    } catch {}
+  }
   if (ui.effect2DropPending && cards.length === 0 && prevMyCardsSig){
     try{
       const prev = JSON.parse(prevMyCardsSig);
@@ -3598,7 +3624,8 @@ function renderMyHand(){
     if (ui.effect2Selecting && ui.effect2SelectedIndex === i){
       card.classList.add('selected');
     }
-    if (ui.effect2Selecting && ui.effect2DropPending && ui.effect2SelectedIndex === i){
+    if (ui.effect2Selecting && ui.effect2DropPending && ui.effect2SelectedIndex === i
+      && (!prevCards || cards.length >= prevCards.length)){
       card.classList.add('drag-source-hidden');
     }
     if (ui.effect6Selecting && ui.selectedIndex === i){
