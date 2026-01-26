@@ -290,6 +290,17 @@
     backface-visibility:hidden;
   }
 
+  @keyframes explorationReopen{
+    0%{ transform:translate(-50%,0) rotate(var(--rot,0deg)) rotateY(0deg); }
+    45%{ transform:translate(-50%,0) rotate(calc(var(--rot,0deg) + 90deg)) rotateY(180deg); }
+    100%{ transform:translate(-50%,0) rotate(calc(var(--rot,0deg) + 360deg)) rotateY(360deg); }
+  }
+  .mini-card.exploration-reopen{
+    animation: explorationReopen 720ms ease-in-out 1;
+    transform-style:preserve-3d;
+    backface-visibility:hidden;
+  }
+
   .reshuffle-flyer{
     position:fixed;
     width:42px;height:62px;border-radius:10px;
@@ -455,7 +466,8 @@
     overflow:hidden;
   }
   .played-card .card-decor-right{
-    right:2%;
+    right:0%;
+    width:70%;
   }
   .my-card .card-decor-right{
     right:0%;
@@ -1404,12 +1416,13 @@ function setCardFace(el, value){
   effectText.className = 'card-effect-text';
   effectText.textContent = getCardEffectText(key);
   decorRight.appendChild(effectText);
+  const fitOptions = el.classList.contains('played-card') ? { minSize: 3, maxSize: 9 } : { minSize: 4, maxSize: 10 };
   requestAnimationFrame(() => {
-    fitTextToBox(decorRight, effectText, { minSize: 4, maxSize: 10 });
+    fitTextToBox(decorRight, effectText, fitOptions);
   });
   if (!decorRight._fitObserver && 'ResizeObserver' in window){
     const ro = new ResizeObserver(() => {
-      fitTextToBox(decorRight, effectText, { minSize: 4, maxSize: 10 });
+      fitTextToBox(decorRight, effectText, fitOptions);
     });
     ro.observe(decorRight);
     decorRight._fitObserver = ro;
@@ -1674,6 +1687,7 @@ function setPlayerHandReveal(playerId, active, { flip = false } = {}){
 
   const fan = playerCircle.querySelector(`.player-fan[data-pid="${playerId}"]`);
   if (!fan) return;
+  const wasActive = fan.classList.contains('exploration-reveal');
   fan.classList.toggle('exploration-reveal', active);
   const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
   const miniCards = fan.querySelectorAll('.mini-card');
@@ -1681,6 +1695,12 @@ function setPlayerHandReveal(playerId, active, { flip = false } = {}){
     if (active){
       card.classList.add('exploration-front');
       card.textContent = String(cards[idx] ?? '');
+      if (wasActive){
+        card.classList.add('exploration-reopen');
+        card.addEventListener('animationend', () => {
+          card.classList.remove('exploration-reopen');
+        }, { once:true });
+      }
     } else {
       card.classList.remove('exploration-front');
       card.textContent = '';
@@ -3657,6 +3677,24 @@ function getRuinSlotCenterByIndex(slotIndex){
   return { x, y };
 }
 
+async function waitForRuinCard(slotIndex, timeoutMs = 600){
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (document.querySelector(`.ruins-card[data-i="${slotIndex}"]`)){
+        resolve(true);
+        return;
+      }
+      if (Date.now() - start > timeoutMs){
+        resolve(false);
+        return;
+      }
+      requestAnimationFrame(check);
+    };
+    check();
+  });
+}
+
 /* ★⑦：遺跡→手札（使用者の画面だけ） */
 async function animateTakeFromRuinToMyHand(slotIndex, cardValue){
   const { x:startX, y:startY } = getRuinSlotCenterByIndex(slotIndex);
@@ -3772,6 +3810,8 @@ async function animateMoveFromPlayerToRuin(playerId, cardValue, slotIndex){
   flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.82)';
   await sleep(440);
 
+  await waitForRuinCard(slotIndex);
+
   flyer.style.transition = 'opacity 140ms ease, transform 140ms ease';
   flyer.style.opacity = '0';
   flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.78)';
@@ -3797,8 +3837,8 @@ async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
   const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
 
   const flyer = document.createElement('div');
-  flyer.className = 'front-flyer ruin-reveal-flyer';
-  flyer.textContent = String(cardValue ?? '');
+  flyer.className = 'front-flyer face-flyer ruin-reveal-flyer';
+  setCardFace(flyer, cardValue);
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(0.9)';
@@ -3824,7 +3864,11 @@ async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
   flyer.style.backgroundPosition = 'center';
   flyer.style.color = 'transparent';
   flyer.style.opacity = '0.9';
+  const faceEl = flyer.querySelector('.card-face');
+  if (faceEl) faceEl.style.opacity = '0';
   await sleep(220);
+
+  await waitForRuinCard(slotIndex);
 
   flyer.style.opacity = '0';
   await sleep(120);
@@ -4041,9 +4085,6 @@ async function resolveOneReveal(targetPlayerId, cardIndex, removedValue){
   let value = removedValue;
   if (value == null){
     value = await removeCardFromHandByIndex(targetPlayerId, cardIndex);
-  }
-  if (value != null){
-    await sleep(220);
   }
   if (value != null){
     const slotIndex = await placeCardIntoRuins(targetPlayerId, value, { skipEvent:true });
