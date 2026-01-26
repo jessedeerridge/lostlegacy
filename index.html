@@ -4161,8 +4161,6 @@ async function handleEffect7Pick(slotIndex){
   }
 
   await emitRuinTakeEvent(myId, cardValue, slotIndex);
-
-  await animateTakeFromRuinToMyHand(slotIndex, cardValue);
   await addCardToHandAtomic(myId, cardValue);
 
   await set(ref(db, `rooms/${state.roomCode}/effect7`), {
@@ -4567,7 +4565,7 @@ function renderRuinsArea(){
   const mine7Picking   = !!(ui.effect7Picking && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'pickRuins');
   const mine7Placing   = !!(ui.effect7Placing && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'placeBack');
 
-  if (mine6Selecting || mine7Placing) wrap.classList.add('drop-enabled');
+  if (mine6Selecting || mine7Picking || mine7Placing) wrap.classList.add('drop-enabled');
 
   const slots = getRuinsSlots();
 
@@ -4785,8 +4783,16 @@ function renderPlayerCircle(players){
       const count = handCards.length;
       const spread = 78;
       const base = (count > 1) ? (-spread/2) : 0;
+      const ef3TargetIndex = (state.effect3 && state.effect3.phase === 'confirm' && state.effect3.targetPlayerId === p.id)
+        ? Number(state.effect3.targetCardIndex)
+        : null;
+      const ef4TargetIndex = (state.effect4 && state.effect4.phase === 'confirm' && state.effect4.targetPlayerId === p.id)
+        ? Number(state.effect4.targetCardIndex)
+        : null;
+      const targetIndex = Number.isFinite(ef3TargetIndex) ? ef3TargetIndex : (Number.isFinite(ef4TargetIndex) ? ef4TargetIndex : null);
+      const minCountForTarget = Number.isFinite(targetIndex) ? Math.min(count, Math.max(1, targetIndex + 1)) : 0;
 
-      const visibleCount = Math.min(6, count);
+      const visibleCount = Math.min(count, Math.max(0, 6, minCountForTarget));
       for(let i2=0;i2<visibleCount;i2++){
         const card = document.createElement('div');
         card.className = 'mini-card';
