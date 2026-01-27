@@ -1,4 +1,5 @@
-<!DOCTYPE html>
+
+<!DOCTYPE html> 
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -1481,12 +1482,24 @@ const CARD_META = {
   "7": { name: "調査", reading: "ちょうさ" },
   "8": { name: "襲撃", reading: "しゅうげき" },
   "x": { name: "待ち伏せ", reading: "ま\u3000ぶ" },
+  // 空中庭園用のカードメタデータ
+  "kt1": { name: "聖女", reading: "せいじょ" },
+  "kt2": { name: "死霊術師", reading: "しりょうじゅつし" },
+  "kt3": { name: "冒険者", reading: "ぼうけんしゃ" },
+  "kt4": { name: "番人", reading: "ばんにん" },
+  "kt5": { name: "空中庭園", reading: "くうちゅうていえん" },
+  "kt6": { name: "偽情報", reading: "ぎじょうほう" },
+  "kt7": { name: "語り部", reading: "かたりべ" },
+  "kt8": { name: "呪い", reading: "のろい" },
+  "ktx": { name: "負傷", reading: "ふしょう" },
 };
 
 function normalizeCardValue(value){
   if (value === null || value === undefined) return '';
   const v = String(value);
   if (v === '✕' || v === '×') return 'x';
+  // ktで始まるカードはそのまま
+  if (v.startsWith('kt')) return v;
   return v;
 }
 
@@ -1516,6 +1529,25 @@ function getCardEffectText(value){
       return '他プレイヤーの手札を見て、手札と交換できる。';
     case 'x':
       return '手札の✕が見られた時、これを捨て札に置き、見たプレイヤーの手札を奪う。';
+    // 空中庭園用の効果テキスト
+    case 'kt1':
+      return '捨て札にこの1があれば、脱落しても一度だけ山札から一枚引いて復帰できる。';
+    case 'kt2':
+      return '他の誰か1人の捨て札を選び、山札に戻して、よく混ぜる。';
+    case 'kt3':
+      return '遺跡から2枚まで見て、1枚選んで取る。好きなカードを遺跡に戻す。';
+    case 'kt4':
+      return '全員の手札を混ぜて配りなおす。その後、誰か1人の手札を見る。';
+    case 'kt5':
+      return 'ききき';
+    case 'kt6':
+      return 'ててて';
+    case 'kt7':
+      return 'じゅじゅじゅ';
+    case 'kt8':
+      return 'れれれ';
+    case 'ktx':
+      return 'さささ';
     default:
       return '';
   }
@@ -1525,16 +1557,25 @@ function getCardDecorCount(value){
   const key = normalizeCardValue(value);
   switch (key){
     case '6':
+    case 'kt6':
       return 2;
     case '7':
     case '8':
     case 'x':
+    case 'kt7':
+    case 'kt8':
+    case 'ktx':
       return 3;
     case '1':
     case '2':
     case '3':
     case '4':
     case '5':
+    case 'kt1':
+    case 'kt2':
+    case 'kt3':
+    case 'kt4':
+    case 'kt5':
       return 1;
     default:
       return 0;
@@ -1623,9 +1664,13 @@ function setCardFace(el, value){
   }
 
   const meta = getCardMeta(key);
-  const displayNumber = key === 'x' ? '×' : key;
-  el.style.setProperty('--card-image', `url('lr${key}.jpg')`);
-
+  const displayNumber = key === 'x' ? '×' : (key.startsWith('kt') ? key.replace('kt', '') : key);
+  // 空中庭園のカード画像はkt+数字.jpg
+  if (key.startsWith('kt')) {
+    el.style.setProperty('--card-image', `url('${key}.jpg')`);
+  } else {
+    el.style.setProperty('--card-image', `url('lr${key}.jpg')`);
+  }
   const face = document.createElement('div');
   face.className = 'card-face';
 
@@ -1842,6 +1887,15 @@ const DECK_SETS = [
     helpRows: [
       [1,2,3,4,5],
       [6,7,8,'x'],
+    ],
+  },
+  {
+    id: 'skygarden',
+    name: '空中庭園',
+    cards: ["kt1","kt2","kt3","kt4","kt5","kt6","kt6","kt7","kt7","kt7","kt8","kt8","kt8","ktx","ktx","ktx"],
+    helpRows: [
+      ["kt1","kt2","kt3","kt4","kt5"],
+      ["kt6","kt7","kt8","ktx"],
     ],
   },
 ];
@@ -6666,4 +6720,3 @@ btnResetRoom.addEventListener('click', async () => {
 
 </body>
 </html>
-
