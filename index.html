@@ -379,7 +379,7 @@
     transform:translate(-50%,-50%);
     display:flex;
     gap:4px;
-    pointer-events:none;
+    pointer-events:auto;
     z-index:12;
   }
   .played-card{
@@ -1469,6 +1469,7 @@ const FIVE_ARROW_DELAY_MS = 1200;
 const LAST_SURVIVOR_DELAY_MS = 1200;
 const XRAY_MINI_DELAY_MS = 1200;
 const ONE_REVEAL_DELAY_MS = 1200;
+const EXPLORATION_SKIP_DELAY_MS = 1200;
 
 const CARD_META = {
   "1": { name: "宿命の少女", reading: "しゅくめい\u3000しょうじょ" },
@@ -2477,6 +2478,12 @@ function playerHandHasFive(playerId){
   return cards.some((v) => String(v) === '5');
 }
 
+function playerHandHasX(playerId){
+  if (playerId === null || playerId === undefined) return false;
+  const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
+  return cards.some((v) => normalizeCardValue(v) === 'x');
+}
+
 async function runExplorationPhaseSequence(eventId){
   if (explorationSequenceActive) return;
   explorationSequenceActive = true;
@@ -2498,10 +2505,14 @@ async function runExplorationPhaseSequence(eventId){
       });
 
       if (group.players.length > 1){
-        await sleep(140);
-        group.players.forEach((pid) => setExplorationTieShake(pid, true));
-        await sleep(1500);
-        group.players.forEach((pid) => setExplorationTieShake(pid, false));
+        if (group.players.includes(state.userId)){
+          await sleep(EXPLORATION_SKIP_DELAY_MS);
+        } else {
+          await sleep(140);
+          group.players.forEach((pid) => setExplorationTieShake(pid, true));
+          await sleep(1500);
+          group.players.forEach((pid) => setExplorationTieShake(pid, false));
+        }
         continue;
       }
 
@@ -2513,6 +2524,17 @@ async function runExplorationPhaseSequence(eventId){
           await setGameOverFoundFive(pid);
         }
         return;
+      }
+
+      if (pid === state.userId && playerHandHasX(pid)){
+        await sleep(EXPLORATION_SKIP_DELAY_MS);
+        await emitExplorationPickEvent({
+          eventId,
+          rank: group.rank,
+          playerId: state.userId,
+          value: null,
+        });
+        continue;
       }
 
       const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
