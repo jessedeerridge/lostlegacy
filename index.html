@@ -902,7 +902,7 @@
   .kt8-guess-number{
     position:absolute;
     right:-2px;
-    top:-16px;
+    top:36px;
     color:#000;
     font-size:18px;
     font-weight:900;
@@ -6506,6 +6506,10 @@ async function handleKt8GuessSelect(guessedNumber){
   if (!cards.length) return;
   const idx = Math.max(0, Math.min(cards.length - 1, targetCardIndex));
   const revealed = String(cards[idx] ?? '');
+  if (normalizeCardValue(revealed) === 'x'){
+    await resolveXReveal(targetPlayerId, idx, null, state.userId);
+    return;
+  }
   const guessed = String(guessedNumber ?? '');
   const revealedComparable = getKt8GuessComparableValue(revealed);
   const guessedComparable = getKt8GuessComparableValue(guessed);
@@ -7149,8 +7153,7 @@ function renderPlayerCircle(players){
             const guessed = String(state.effect8?.guessedNumber || '');
             num.textContent = (state.effect8?.guessResult === 'mismatch' && guessed) ? `${guessed}✕` : guessed;
             if (state.effect8?.guessResult === 'match'){
-              card.classList.add('exploration-front', 'kt8-reveal-match', 'one-reveal-target');
-              setCardFace(card, handCards[i2]);
+              card.classList.add('kt8-reveal-match', 'one-reveal-target');              setCardFace(card, handCards[i2]);
             }
             card.appendChild(num);
           }
