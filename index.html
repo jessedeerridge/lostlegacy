@@ -2067,6 +2067,7 @@ function renderHelpList(){
 
     const enabled = !!deckSetState[set.id];
     toggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    toggle.disabled = !state.isHost;
     if (!enabled) toggle.classList.add('is-disabled');
 
     header.appendChild(toggle);
@@ -2074,7 +2075,6 @@ function renderHelpList(){
 
     const grid = document.createElement('div');
     grid.className = 'help-card-grid';
-    if (!enabled) grid.classList.add('is-disabled');
 
     set.helpRows.forEach((rowCards) => {
       const row = document.createElement('div');
@@ -2086,6 +2086,7 @@ function renderHelpList(){
         const isCardEnabled = !!deckCardState[String(value)];
         card.classList.toggle('is-disabled', !isCardEnabled);
         card.addEventListener('click', () => {
+          if (!state.isHost) return;
           const key = String(value);
           deckCardState[key] = !deckCardState[key];
           if (key === '5' && deckCardState[key]) syncExclusiveFives('starship');
@@ -2104,10 +2105,9 @@ function renderHelpList(){
         deckCardState[cardKey] = isEnabled;
       });
       if (set.id === 'starship' && isEnabled) syncExclusiveFives('starship');
-      if (set.id === 'skygarden' && isEnabled && deckSetState.starship) syncExclusiveFives('starship');
+      if (set.id === 'skygarden' && isEnabled) syncExclusiveFives('starship');
       toggle.setAttribute('aria-pressed', isEnabled ? 'true' : 'false');
       toggle.classList.toggle('is-disabled', !isEnabled);
-      grid.classList.toggle('is-disabled', !isEnabled);
       renderHelpList();
     });
 
@@ -7351,7 +7351,6 @@ function renderPlayerCircle(players){
 
 function buildDeckForPlayers(playerCount){
   return DECK_SETS.flatMap((set) => {
-    if (!deckSetState[set.id]) return [];
     return Object.entries(set.cardPool).flatMap(([cardKey, count]) => {
       if (!deckCardState[cardKey]) return [];
       return new Array(Number(count) || 0).fill(cardKey);
