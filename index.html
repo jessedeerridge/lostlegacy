@@ -2900,6 +2900,7 @@ let lastKt4ShuffleEventId = null;
 let lastKt2ShuffleEventId = null;
 let lastKt7CollectAnimKey = null;
 let lastKt7ReturnAnimKey = null;
+let kt7PairAnimSession = null;
 let kt2ShuffleAnimationChain = Promise.resolve();
 
 function generateRoomCode(length = 6){
@@ -5663,23 +5664,30 @@ async function animateKt7PairCollectToCenter(slotIndexes = []){
   const pc = playerCircle.getBoundingClientRect();
   const cx = pc.left + pc.width/2;
   const cy = pc.top + pc.height/2 + RUINS_SHIFT_Y;
-  const flyers = [];
 
+  if (kt7PairAnimSession?.flyers?.length){
+    kt7PairAnimSession.flyers.forEach((f) => f?.remove?.());
+  }
+
+  const flyers = [];
   idxs.forEach((slotIndex, i) => {
     const { x, y } = getRuinSlotCenterByIndex(slotIndex);
     const flyer = document.createElement('div');
-    flyer.className = 'back-flyer';
+    flyer.className = 'reshuffle-flyer';
     flyer.style.left = `${x}px`;
     flyer.style.top = `${y}px`;
     flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.88)';
+    flyer.style.zIndex = String(4300 + i);
     document.body.appendChild(flyer);
     flyers.push(flyer);
   });
 
-  await sleep(0);
+  kt7PairAnimSession = { flyers, slotIndexes: idxs, cx, cy };
+
+  await sleep(20);
   flyers.forEach((flyer, i) => {
     const tilt = i === 0 ? -16 : 16;
-    flyer.style.transition = 'transform 180ms ease, left 180ms ease, top 180ms ease';
+    flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
     flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(0.96)`;
     flyer.style.left = `${cx + (i === 0 ? -10 : 10)}px`;
     flyer.style.top = `${cy - 8}px`;
@@ -5688,19 +5696,13 @@ async function animateKt7PairCollectToCenter(slotIndexes = []){
   await sleep(220);
   flyers.forEach((flyer, i) => {
     const tilt = i === 0 ? 14 : -14;
-    flyer.style.transition = 'transform 180ms ease, left 180ms ease, top 180ms ease';
+    flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
     flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(1.02)`;
     flyer.style.left = `${cx + (i === 0 ? -5 : 5)}px`;
     flyer.style.top = `${cy + 4}px`;
   });
 
   await sleep(220);
-  flyers.forEach((flyer) => {
-    flyer.style.transition = 'opacity 180ms ease';
-    flyer.style.opacity = '0';
-  });
-  await sleep(220);
-  flyers.forEach((flyer) => flyer.remove());
 }
 
 async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false){
@@ -5710,21 +5712,75 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
   const pc = playerCircle.getBoundingClientRect();
   const cx = pc.left + pc.width/2;
   const cy = pc.top + pc.height/2 + RUINS_SHIFT_Y;
-  const order = swapped && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
-  const flyers = [];
 
-  order.forEach((slotIndex, i) => {
-    const flyer = document.createElement('div');
-    flyer.className = 'back-flyer';
-    flyer.style.left = `${cx + (i === 0 ? -7 : 7)}px`;
-    flyer.style.top = `${cy}px`;
-    flyer.style.transform = `translate(-50%,-50%) rotate(${i === 0 ? -14 : 14}deg) scale(1.0)`;
-    document.body.appendChild(flyer);
-    flyers.push({ flyer, slotIndex, i });
+  let flyers = Array.isArray(kt7PairAnimSession?.flyers) ? kt7PairAnimSession.flyers.filter(Boolean) : [];
+  if (!flyers.length){
+    flyers = idxs.map((_, i) => {
+      const flyer = document.createElement('div');
+      flyer.className = 'reshuffle-flyer';
+      flyer.style.left = `${cx + (i === 0 ? -5 : 5)}px`;
+      flyer.style.top = `${cy + 4}px`;
+      flyer.style.transform = `translate(-50%,-50%) rotate(${i === 0 ? 14 : -14}deg) scale(1.02)`;
+      flyer.style.zIndex = String(4300 + i);
+      document.body.appendChild(flyer);
+      return flyer;
+    });
+  }
+
+  const stackPoints = flyers.map((_, i) => ({
+    x: cx + (i * 4),
+    y: cy + (i * 4),
+    rot: 5,
+  }));
+
+  flyers.forEach((f, i) => {
+    const p = stackPoints[i];
+    f.style.transition = 'left 220ms ease-in-out, top 220ms ease-in-out, transform 220ms ease-in-out';
+    f.style.left = `${p.x}px`;
+    f.style.top = `${p.y}px`;
+    f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.92)`;
+    f.style.zIndex = String(4300 + i);
   });
+  await sleep(240);
 
-  await sleep(80);
-  flyers.forEach(({ flyer, slotIndex, i }) => {
+  const OUT_X = 42;
+  const TILT_MORE = 5;
+  const DUR = 200;
+  const loops = Math.min(3, Math.max(1, flyers.length - 1));
+
+  for (let k = 0; k < loops; k++){
+    const frontIdx = flyers.length - 1;
+    const backIdx = flyers.length - 2;
+    const frontCard = flyers[frontIdx];
+    const frontPoint = stackPoints[frontIdx];
+    if (!frontCard || !frontPoint || backIdx < 0) break;
+
+    frontCard.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+    frontCard.style.left = `${frontPoint.x + OUT_X}px`;
+    frontCard.style.top = `${frontPoint.y}px`;
+    frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.92)`;
+    await sleep(DUR);
+
+    const movedPoint = stackPoints.pop();
+    stackPoints.splice(backIdx, 0, movedPoint);
+    const movedFlyer = flyers.pop();
+    flyers.splice(backIdx, 0, movedFlyer);
+
+    flyers.forEach((f, i) => {
+      f.style.zIndex = String(4300 + i);
+    });
+
+    movedFlyer.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+    movedFlyer.style.left = `${stackPoints[backIdx].x}px`;
+    movedFlyer.style.top = `${stackPoints[backIdx].y}px`;
+    movedFlyer.style.transform = `translate(-50%,-50%) rotate(${stackPoints[backIdx].rot}deg) scale(0.92)`;
+    await sleep(DUR);
+    await sleep(20);
+  }
+
+  const order = swapped && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
+  flyers.forEach((flyer, i) => {
+    const slotIndex = order[i] ?? order[0];
     const { x, y } = getRuinSlotCenterByIndex(slotIndex);
     flyer.style.transition = 'left 620ms ease, top 620ms ease, transform 620ms ease';
     flyer.style.left = `${x}px`;
@@ -5733,12 +5789,13 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
   });
 
   await sleep(700);
-  flyers.forEach(({ flyer }) => {
+  flyers.forEach((flyer) => {
     flyer.style.transition = 'opacity 150ms ease';
     flyer.style.opacity = '0';
   });
   await sleep(180);
-  flyers.forEach(({ flyer }) => flyer.remove());
+  flyers.forEach((flyer) => flyer.remove());
+  kt7PairAnimSession = null;
 }
 
 function runKt7PhaseAnimations(raw){
