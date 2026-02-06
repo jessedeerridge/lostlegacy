@@ -357,6 +357,11 @@
     --card-title-size:4.4px;
     --card-reading-size:3.6px;
   }
+  .player-circle.kt4-collecting .mini-card,
+  .my-hand.kt4-collecting .my-card{
+    opacity:0 !important;
+    pointer-events:none;
+  }
 
   /* ★③/④：扇カードが大小アニメ＆クリック可（使用者のみ） */
   @keyframes fanPickPulse{
@@ -1845,6 +1850,8 @@ const ui = {
   effect8Returning: false,
   effect8TargetPlayerId: null,
 
+  kt4ShuffleAnimating: false,
+
   confirmAction: null,
 };
 
@@ -2664,6 +2671,7 @@ let lastFiveSlideEventId = null;
 let lastXRevealEventId = null;
 let lastOneRevealEventId = null;
 let lastExplorationEventId = null;
+let lastKt4ShuffleEventId = null;
 
 function generateRoomCode(length = 6){
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -2942,7 +2950,8 @@ function subscribeEffect4(){
 
     if (mine && state.effect4 && state.effect4.phase === 'confirm' && !state.gameOver){
       const v = state.effect4.revealed;
-      if (String(v) === 'x' || String(v) === '✕'){
+      const mode = String(state.effect4.mode || 'normal');
+      if (mode !== 'kt4' && (String(v) === 'x' || String(v) === '✕')){
         hidePeekCard();
         hideConfirmPop();
       } else {
@@ -3115,6 +3124,22 @@ function subscribeReshuffleEvent(){
 
     const count = Number(ev.count || 0);
     animateReshufflePlayedToDeck(count);
+  });
+}
+
+function subscribeKt4ShuffleEvent(){
+  const evRef = ref(db, `rooms/${state.roomCode}/kt4ShuffleEvent`);
+  onValue(evRef, snap => {
+    const ev = snap.val();
+    if (!ev || !ev.id) return;
+    if (ev.id === lastKt4ShuffleEventId) return;
+    lastKt4ShuffleEventId = ev.id;
+
+    const now = Date.now();
+    if (ev.at && (now - ev.at) > 15000) return;
+
+    const counts = (ev.counts && typeof ev.counts === 'object') ? ev.counts : {};
+    animateKt4ShuffleHands(counts);
   });
 }
 
@@ -4194,6 +4219,17 @@ async function emitReshuffleEvent(count){
   });
 }
 
+async function emitKt4ShuffleEvent(counts, byPlayerId){
+  if (!state.roomCode) return;
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/kt4ShuffleEvent`), {
+    id,
+    counts: counts || {},
+    byPlayerId: byPlayerId || null,
+    at: Date.now(),
+  });
+}
+
 async function emitRuinMoveEvent(fromPlayerId, cardValue, slotIndex, mode){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -4331,6 +4367,142 @@ function getPlayerCardRect(playerId, cardIndex){
   const cardEl = getPlayerCardAnchorEl(playerId, idx);
   if (!cardEl) return null;
   return cardEl.getBoundingClientRect();
+}
+
+function setKt4CollectionMask(active){
+  ui.kt4ShuffleAnimating = !!active;
+  if (playerCircle) playerCircle.classList.toggle('kt4-collecting', !!active);
+  if (myHandEl) myHandEl.classList.toggle('kt4-collecting', !!active);
+}
+
+function getHandCenterPoint(playerId){
+  if (playerId === state.userId){
+    const r = myHandEl?.getBoundingClientRect?.();
+    if (r && r.width && r.height){
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+  }
+  const anchor = getPlayerAnchorEl(playerId);
+  if (anchor){
+    const r = anchor.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+  const pc = playerCircle.getBoundingClientRect();
+  return { x: pc.left + pc.width / 2, y: pc.top + pc.height / 2 };
+}
+
+async function animateKt4ShuffleHands(counts = {}){
+  const pc = playerCircle.getBoundingClientRect();
+  const cx = pc.left + pc.width / 2;
+  const cy = pc.top + pc.height / 2;
+
+  const entries = Object.entries(counts)
+    .map(([pid, c]) => ({ pid, count: Math.max(0, Number(c || 0)) }))
+    .filter(v => v.pid && v.count > 0);
+  if (!entries.length) return;
+
+  setKt4CollectionMask(true);
+
+  try {
+    const flyers = [];
+    entries.forEach(({ pid, count }) => {
+      const start = getHandCenterPoint(pid);
+      for (let i = 0; i < count; i++){
+        const f = document.createElement('div');
+        f.className = 'reshuffle-flyer';
+        f.style.left = `${start.x + (((i * 9) % 18) - 9)}px`;
+        f.style.top = `${start.y + (((i * 7) % 14) - 7)}px`;
+        f.style.transform = `translate(-50%,-50%) rotate(${((i * 11) % 14) - 7}deg) scale(1)`;
+        document.body.appendChild(f);
+        flyers.push(f);
+      }
+    });
+
+    await sleep(20);
+
+    flyers.forEach((f, i) => {
+      f.style.transition = 'left 360ms ease, top 360ms ease, transform 360ms ease';
+      f.style.left = `${cx + (((i * 13) % 24) - 12)}px`;
+      f.style.top = `${cy + (((i * 17) % 18) - 9)}px`;
+      f.style.transform = `translate(-50%,-50%) rotate(${((i * 19) % 24) - 12}deg) scale(0.96)`;
+    });
+    await sleep(380);
+
+    const centerPoints = flyers.map((_, i) => ({
+      x: cx + (i * 4),
+      y: cy + (i * 4),
+      rot: 5,
+    }));
+
+    flyers.forEach((f, i) => {
+      const p = centerPoints[i];
+      f.style.transition = 'left 220ms ease-in-out, top 220ms ease-in-out, transform 220ms ease-in-out';
+      f.style.left = `${p.x}px`;
+      f.style.top = `${p.y}px`;
+      f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.9)`;
+      f.style.zIndex = String(4000 + i);
+    });
+    await sleep(240);
+
+    const OUT_X = 78;
+    const TILT_MORE = 5;
+    const DUR = 220;
+    const PAUSE = 20;
+    const loops = Math.min(3, Math.max(1, flyers.length - 1));
+
+    for (let k = 0; k < loops; k++){
+      const frontIdx = flyers.length - 1;
+      const backIdx = flyers.length - 2;
+      const frontCard = flyers[frontIdx];
+      const frontPoint = centerPoints[frontIdx];
+      const backPoint = centerPoints[backIdx];
+      if (!frontCard || !frontPoint || !backPoint) break;
+
+      frontCard.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+      frontCard.style.left = `${frontPoint.x + OUT_X}px`;
+      frontCard.style.top = `${frontPoint.y}px`;
+      frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.9)`;
+      await sleep(DUR);
+
+      const moved = centerPoints.pop();
+      centerPoints.splice(backIdx, 0, moved);
+      const movedFlyer = flyers.pop();
+      flyers.splice(backIdx, 0, movedFlyer);
+
+      flyers.forEach((f, i) => {
+        f.style.zIndex = String(4000 + i);
+      });
+
+      movedFlyer.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+      movedFlyer.style.left = `${centerPoints[backIdx].x}px`;
+      movedFlyer.style.top = `${centerPoints[backIdx].y}px`;
+      movedFlyer.style.transform = `translate(-50%,-50%) rotate(${centerPoints[backIdx].rot}deg) scale(0.9)`;
+      await sleep(DUR);
+      await sleep(PAUSE);
+    }
+
+    let cursor = 0;
+    entries.forEach(({ pid, count }) => {
+      const end = getHandCenterPoint(pid);
+      for (let i = 0; i < count; i++){
+        const f = flyers[cursor++];
+        if (!f) continue;
+        f.style.transition = 'left 420ms cubic-bezier(0.22, 1, 0.36, 1), top 420ms cubic-bezier(0.22, 1, 0.36, 1), transform 420ms ease, opacity 160ms ease';
+        f.style.left = `${end.x + (((i * 11) % 20) - 10)}px`;
+        f.style.top = `${end.y + (((i * 9) % 14) - 7)}px`;
+        f.style.transform = `translate(-50%,-50%) rotate(${((i * 13) % 20) - 10}deg) scale(0.72)`;
+      }
+    });
+
+    await sleep(450);
+    flyers.forEach(f => {
+      f.style.opacity = '0';
+    });
+    await sleep(180);
+    flyers.forEach(f => f.remove());
+  } finally {
+    setKt4CollectionMask(false);
+  }
 }
 
 function getPlayedRowAnchorEl(playerId){
@@ -5135,6 +5307,7 @@ async function playCardFromHand(cardIndex){
   if (cardIndex < 0 || cardIndex >= cards.length) return;
 
   const used = cards.splice(cardIndex, 1)[0];
+  const usedKey = normalizeCardValue(used);
 
   await update(ref(db, `rooms/${state.roomCode}/hands/${myId}`), { cards });
 
@@ -5145,31 +5318,35 @@ async function playCardFromHand(cardIndex){
     return a;
   }, { applyLocally:false });
 
-  if (String(used) === '2'){
+  if (usedKey === '2'){
     await resolveEffect2(myId);
     return;
   }
-  if (String(used) === '3'){
+  if (usedKey === '3'){
     await resolveEffect3(myId);
     return;
   }
-  if (String(used) === '4'){
+  if (usedKey === '4'){
     await resolveEffect4(myId);
     return;
   }
-  if (String(used) === '6'){
+  if (usedKey === 'kt4'){
+    await resolveKt4(myId);
+    return;
+  }
+  if (usedKey === '6'){
     await resolveEffect6(myId);
     return;
   }
-  if (String(used) === '7'){
+  if (usedKey === '7'){
     await resolveEffect7(myId);
     return;
   }
-  if (String(used) === '8'){
+  if (usedKey === '8'){
     await resolveEffect8(myId);
     return;
   }
-  if (String(used) === '1'){
+  if (usedKey === '1'){
     await advanceTurnToNextPlayer();
     return;
   }
@@ -5250,6 +5427,7 @@ async function clearEffectsForXReveal(){
   if (!state.roomCode) return;
   await Promise.all([
     set(ref(db, `rooms/${state.roomCode}/effect3`), null),
+    set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
   ]);
 }
@@ -5682,8 +5860,78 @@ async function resolveEffect4(playerId){
     at: Date.now(),
     targetPlayerId: null,
     targetCardIndex: null,
-    revealed: null
+    revealed: null,
+    mode: 'normal',
   });
+}
+
+async function resolveKt4(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  await update(turnRef, { paused:true });
+  await reshuffleAllHandsForKt4(playerId);
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effect4`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'select',
+    at: Date.now(),
+    targetPlayerId: null,
+    targetCardIndex: null,
+    revealed: null,
+    mode: 'kt4',
+  });
+}
+
+async function reshuffleAllHandsForKt4(playerId){
+  if (!state.roomCode) return;
+  const handsRef = ref(db, `rooms/${state.roomCode}/hands`);
+  const counts = {};
+
+  try {
+    const pre = await get(handsRef);
+    const srcPre = (pre.val() && typeof pre.val() === 'object') ? pre.val() : {};
+    Object.entries(srcPre).forEach(([pid, h]) => {
+      const cards = Array.isArray(h?.cards) ? h.cards : [];
+      counts[pid] = cards.length;
+    });
+  } catch {}
+
+  await emitKt4ShuffleEvent(counts, playerId);
+  await sleep(120);
+
+  await runTransaction(handsRef, (hands) => {
+    const src = (hands && typeof hands === 'object') ? hands : {};
+    const idsFromSeats = (latestPlayers || []).map(p => p.id).filter(Boolean);
+    const allIds = [...idsFromSeats, ...Object.keys(src).filter(pid => !idsFromSeats.includes(pid))];
+
+    const pool = [];
+    const next = { ...src };
+    allIds.forEach((pid) => {
+      const cards = Array.isArray(src?.[pid]?.cards) ? [...src[pid].cards] : [];
+      counts[pid] = cards.length;
+      cards.forEach(v => pool.push(v));
+      if (!next[pid] || typeof next[pid] !== 'object') next[pid] = {};
+      next[pid] = { ...next[pid], cards: [] };
+    });
+
+    shuffleInPlace(pool);
+
+    let cur = 0;
+    allIds.forEach((pid) => {
+      const n = Number(counts[pid] || 0);
+      next[pid] = { ...next[pid], cards: pool.slice(cur, cur + n) };
+      cur += n;
+    });
+
+    return next;
+  }, { applyLocally:false });
+
+  await sleep(2100);
 }
 
 async function handleEffect4Pick(targetPlayerId, cardIndex){
@@ -5698,13 +5946,15 @@ async function handleEffect4Pick(targetPlayerId, cardIndex){
 
   const idx = Math.max(0, Math.min(cards.length - 1, Number(cardIndex||0)));
   const revealed = String(cards[idx] ?? '');
+  const revealedKey = normalizeCardValue(revealed);
+  const mode = String(ef.mode || 'normal');
 
-  if (revealed === '1'){
+  if (revealedKey === '1'){
     await resolveOneReveal(targetPlayerId, idx, null, state.userId);
     return;
   }
 
-  if (revealed === 'x' || revealed === '✕'){
+  if (revealedKey === 'x'){
     await set(ref(db, `rooms/${state.roomCode}/effect4`), {
       id: ef.id,
       playerId: ef.playerId,
@@ -5713,9 +5963,14 @@ async function handleEffect4Pick(targetPlayerId, cardIndex){
       at: Date.now(),
       targetPlayerId,
       targetCardIndex: idx,
-      revealed
+      revealed,
+      mode,
     });
-    await resolveEffect4XReveal(targetPlayerId, idx);
+    if (mode === 'kt4'){
+      await resolveXReveal(targetPlayerId, idx, null, state.userId);
+    } else {
+      await resolveEffect4XReveal(targetPlayerId, idx);
+    }
     return;
   }
 
@@ -5728,7 +5983,8 @@ async function handleEffect4Pick(targetPlayerId, cardIndex){
     at: Date.now(),
     targetPlayerId,
     targetCardIndex: idx,
-    revealed
+    revealed,
+    mode,
   });
 }
 
@@ -6189,6 +6445,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeDrawEvent();
   subscribeReturnTopEvent();
   subscribeReshuffleEvent();
+  subscribeKt4ShuffleEvent();
   subscribeRuinMoveEvent();
   subscribeRuinTakeEvent();
   subscribeHandTransferEvent();
@@ -6815,6 +7072,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/oneRevealEvent`), null),
+    set(ref(db, `rooms/${state.roomCode}/kt4ShuffleEvent`), null),
   ]);
 
   if (initialDrawDisp){
@@ -6865,6 +7123,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/fiveSlideEvent`)),
     remove(ref(db, `${base}/xRevealEvent`)),
     remove(ref(db, `${base}/oneRevealEvent`)),
+    remove(ref(db, `${base}/kt4ShuffleEvent`)),
     remove(ref(db, `${base}/explorationFaceEvent`)),
     remove(ref(db, `${base}/explorationPickEvent`)),
     remove(ref(db, `${base}/handTransferEvent`)),
