@@ -3448,12 +3448,20 @@ function subscribeKt2ShuffleEvent(){
     const fromPlayerId = String(ev.fromPlayerId || '');
     const fromPlayedIndex = Number(ev.fromPlayedIndex);
     const byPlayerId = String(ev.byPlayerId || '');
+    const transferMs = Math.max(0, Number(ev.transferMs || 0));
+
     if (fromPlayerId && byPlayerId && byPlayerId !== state.userId){
       animateReturnTopFromPlayedCardToDeck(fromPlayerId, fromPlayedIndex);
     }
 
     const count = Number(ev.count || 1);
-    animateKt2ShuffleToDeck(count);
+    if (transferMs > 0){
+      setTimeout(() => {
+        animateKt2ShuffleToDeck(count);
+      }, transferMs);
+    } else {
+      animateKt2ShuffleToDeck(count);
+    }
   });
 }
 
@@ -4669,6 +4677,7 @@ async function emitKt2ShuffleEvent(count = 1, byPlayerId = null){
     byPlayerId: byPlayerId || null,
     fromPlayerId: null,
     fromPlayedIndex: null,
+    transferMs: 0,
     at: Date.now(),
   });
 }
@@ -6508,6 +6517,7 @@ async function handleKt2Drop(fromPlayerId, fromPlayedIndex, sourceEl = null){
   if (!ef || ef.playerId !== state.userId || ef.phase !== 'select') return;
   if (!fromPlayerId || fromPlayerId === state.userId) return;
 
+  const transferMs = 680;
   const evId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await set(ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`), {
     id: evId,
@@ -6515,10 +6525,11 @@ async function handleKt2Drop(fromPlayerId, fromPlayedIndex, sourceEl = null){
     byPlayerId: state.userId,
     fromPlayerId: fromPlayerId || null,
     fromPlayedIndex: Number.isFinite(Number(fromPlayedIndex)) ? Number(fromPlayedIndex) : null,
+    transferMs,
     at: Date.now(),
   });
 
-  await sleep(420);
+  await sleep(transferMs);
 
   const picked = await removePlayedCardByIndex(fromPlayerId, fromPlayedIndex);
   if (picked == null){
