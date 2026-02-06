@@ -3478,7 +3478,7 @@ function subscribeRuinMoveEvent(){
     const mode = ev.mode || null;
 
     if (!fromPid) return;
-    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8') return;
+    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination') return;
 
     if (mode === 'oneReveal' || mode === 'kt8'){
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
@@ -5904,6 +5904,9 @@ async function playCardFromHand(cardIndex){
     return a;
   }, { applyLocally:false });
 
+  const forcedKtxElimination = await checkAndHandleKtXElimination(myId, { seq: state.turn?.turnSeq });
+  if (forcedKtxElimination) return;
+
   if (usedKey === '2'){
     await resolveEffect2(myId);
     return;
@@ -5983,6 +5986,40 @@ async function addCardToPlayed(playerId, cardValue){
     a.push(String(cardValue ?? ''));
     return a;
   }, { applyLocally:false });
+
+  await checkAndHandleKtXElimination(playerId, { seq: state.turn?.turnSeq });
+}
+
+async function checkAndHandleKtXElimination(playerId, { seq = null } = {}){
+  if (!state.roomCode || !playerId) return false;
+  if (state.eliminated?.[playerId]) return false;
+
+  const playedSnap = await get(ref(db, `rooms/${state.roomCode}/played/${playerId}`));
+  const played = Array.isArray(playedSnap.val()) ? playedSnap.val() : [];
+  const ktxCount = played.reduce((n, v) => n + (normalizeCardValue(v) === 'ktx' ? 1 : 0), 0);
+  if (ktxCount < 2) return false;
+
+  const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`);
+  let movedValue = null;
+  const rem = await runTransaction(cardsRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    if (arr.length === 1){
+      movedValue = String(arr[0] ?? '');
+      return [];
+    }
+    return arr;
+  }, { applyLocally:false });
+
+  if (rem.committed && movedValue != null){
+    const slotIndex = await placeCardIntoRuins(playerId, movedValue, { skipEvent:true });
+    if (slotIndex !== null){
+      await emitRuinMoveEvent(playerId, movedValue, slotIndex, 'ktxElimination');
+      await sleep(RUIN_MOVE_ANIM_MS);
+    }
+  }
+
+  await eliminatePlayerWithKt1Check(playerId, seq);
+  return true;
 }
 
 async function placeCardIntoRuins(playerId, cardValue, { skipEvent = false, eventMode = null } = {}){
