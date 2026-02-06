@@ -899,14 +899,6 @@
     outline-offset:2px;
     overflow:visible;
   }
-  .mini-card.kt8-targeted.kt8-reveal-match{
-    transform:translate(-50%,0) rotate(var(--rot,0deg)) scale(var(--ruin-scale-mini)) !important;
-    transition:transform 220ms ease;
-  }
-  .my-card.kt8-targeted.kt8-reveal-match{
-    transform:scale(var(--ruin-scale-my));
-    transition:transform 220ms ease;
-  }
   .kt8-guess-number{
     position:absolute;
     right:-2px;
@@ -2100,10 +2092,10 @@ function hideKt8GuessPanel(){
 
 function clearKt8RevealClasses(){
   playerCircle.querySelectorAll('.mini-card.kt8-targeted, .mini-card.kt8-reveal-match').forEach((el) => {
-    el.classList.remove('kt8-targeted', 'kt8-reveal-match');
+    el.classList.remove('kt8-targeted', 'kt8-reveal-match', 'one-reveal-target');
   });
   myHandEl.querySelectorAll('.my-card.kt8-targeted, .my-card.kt8-reveal-match').forEach((el) => {
-    el.classList.remove('kt8-targeted', 'kt8-reveal-match');
+    el.classList.remove('kt8-targeted', 'kt8-reveal-match', 'one-reveal-target');
   });
   document.querySelectorAll('.kt8-guess-number').forEach((el) => el.remove());
 }
@@ -4131,9 +4123,10 @@ function renderMyHand(){
       if (state.effect8?.phase === 'guessResult'){
         const num = document.createElement('div');
         num.className = 'kt8-guess-number';
-        num.textContent = String(state.effect8?.guessedNumber || '');
+        const guessed = String(state.effect8?.guessedNumber || '');
+        num.textContent = (state.effect8?.guessResult === 'mismatch' && guessed) ? `${guessed}✕` : guessed;
         if (state.effect8?.guessResult === 'match'){
-          card.classList.add('kt8-reveal-match');
+          card.classList.add('kt8-reveal-match', 'one-reveal-target');
         }
         card.appendChild(num);
       }
@@ -6527,7 +6520,23 @@ async function handleKt8GuessSelect(guessedNumber){
   if (result === 'match'){
     await sleep(1200);
     await removeCardFromHandByIndex(targetPlayerId, idx);
-    await placeCardIntoRuins(targetPlayerId, revealed, { eventMode: 'kt8' });
+
+    const slotsNow = getRuinsSlots();
+    const slotIndex = firstEmptyRuinSlotIndex(slotsNow);
+    if (slotIndex !== null){
+      await emitRuinMoveEvent(targetPlayerId, revealed, slotIndex, 'kt8');
+      await sleep(RUIN_MOVE_ANIM_MS);
+      const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+      await runTransaction(ruinsRef, (ruins) => {
+        const src = Array.isArray(ruins) ? [...ruins] : [];
+        const slots = new Array(6).fill(null);
+        for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+        if (slots[slotIndex]) return slots;
+        slots[slotIndex] = { v: String(revealed), by: targetPlayerId, at: Date.now() };
+        return slots;
+      }, { applyLocally:false });
+    }
+
     await set(ref(db, `rooms/${state.roomCode}/effect8`), null);
     await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
     await advanceTurnToNextPlayer();
@@ -7128,9 +7137,10 @@ function renderPlayerCircle(players){
           if (state.effect8?.phase === 'guessResult'){
             const num = document.createElement('div');
             num.className = 'kt8-guess-number';
-            num.textContent = String(state.effect8?.guessedNumber || '');
+            const guessed = String(state.effect8?.guessedNumber || '');
+            num.textContent = (state.effect8?.guessResult === 'mismatch' && guessed) ? `${guessed}✕` : guessed;
             if (state.effect8?.guessResult === 'match'){
-              card.classList.add('exploration-front', 'kt8-reveal-match');
+              card.classList.add('exploration-front', 'kt8-reveal-match', 'one-reveal-target');
               setCardFace(card, handCards[i2]);
             }
             card.appendChild(num);
