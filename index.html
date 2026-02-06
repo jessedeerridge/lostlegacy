@@ -4944,50 +4944,94 @@ async function animateKt2ShuffleToDeck(count = 1){
   const dr = deckPile.getBoundingClientRect();
   const deckX = dr.left + dr.width / 2;
   const deckY = dr.top + dr.height / 2;
-  const pc = playerCircle.getBoundingClientRect();
-  const cx = pc.left + pc.width / 2;
-  const cy = pc.top + pc.height / 2;
 
-  const n = Math.min(Math.max(1, Number(count || 1)), 6);
+  const n = Math.min(Math.max(2, Number(count || 1)), 6);
   const flyers = [];
+
   for (let i = 0; i < n; i++){
     const f = document.createElement('div');
     f.className = 'reshuffle-flyer';
-    f.style.left = `${cx + (((i * 17) % 26) - 13)}px`;
-    f.style.top = `${cy + (((i * 11) % 20) - 10)}px`;
-    f.style.transform = `translate(-50%,-50%) rotate(${((i * 19) % 24) - 12}deg) scale(0.94)`;
+    f.style.left = `${deckX + (((i * 11) % 16) - 8)}px`;
+    f.style.top = `${deckY + (((i * 7) % 12) - 6)}px`;
+    f.style.transform = `translate(-50%,-50%) rotate(${((i * 13) % 18) - 9}deg) scale(0.9)`;
+    f.style.zIndex = String(4200 + i);
     document.body.appendChild(f);
     flyers.push(f);
   }
 
-  await sleep(50);
+  await sleep(30);
 
-  const front = flyers[flyers.length - 1];
-  if (front){
-    front.style.transition = 'left 220ms ease-in-out, top 220ms ease-in-out, transform 220ms ease-in-out';
-    front.style.left = `${cx + 54}px`;
-    front.style.top = `${cy}px`;
-    front.style.transform = 'translate(-50%,-50%) rotate(10deg) scale(0.9)';
-    await sleep(220);
-    front.style.left = `${cx}px`;
-    front.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.9)';
-    await sleep(180);
+  const stackPoints = flyers.map((_, i) => ({
+    x: deckX + (((i * 3) % 8) - 4),
+    y: deckY + (((i * 2) % 8) - 4),
+    rot: 4,
+  }));
+
+  flyers.forEach((f, i) => {
+    const p = stackPoints[i];
+    f.style.transition = 'left 180ms ease-in-out, top 180ms ease-in-out, transform 180ms ease-in-out';
+    f.style.left = `${p.x}px`;
+    f.style.top = `${p.y}px`;
+    f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.86)`;
+  });
+  await sleep(200);
+
+  const OUT_X = 42;
+  const TILT_MORE = 5;
+  const DUR = 200;
+  const PAUSE = 16;
+  const loops = Math.min(3, Math.max(1, flyers.length - 1));
+
+  for (let k = 0; k < loops; k++){
+    const frontIdx = flyers.length - 1;
+    const backIdx = flyers.length - 2;
+    const frontCard = flyers[frontIdx];
+    const frontPoint = stackPoints[frontIdx];
+    const backPoint = stackPoints[backIdx];
+    if (!frontCard || !frontPoint || !backPoint) break;
+
+    frontCard.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+    frontCard.style.left = `${frontPoint.x + OUT_X}px`;
+    frontCard.style.top = `${frontPoint.y}px`;
+    frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.86)`;
+    await sleep(DUR);
+
+    const moved = stackPoints.pop();
+    stackPoints.splice(backIdx, 0, moved);
+    const movedFlyer = flyers.pop();
+    flyers.splice(backIdx, 0, movedFlyer);
+
+    flyers.forEach((f, i) => {
+      f.style.zIndex = String(4200 + i);
+    });
+
+    movedFlyer.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+    movedFlyer.style.left = `${stackPoints[backIdx].x}px`;
+    movedFlyer.style.top = `${stackPoints[backIdx].y}px`;
+    movedFlyer.style.transform = `translate(-50%,-50%) rotate(${stackPoints[backIdx].rot}deg) scale(0.86)`;
+    await sleep(DUR);
+    await sleep(PAUSE);
   }
 
   flyers.forEach((f, i) => {
-    f.style.transition = 'left 360ms cubic-bezier(0.22, 1, 0.36, 1), top 360ms cubic-bezier(0.22, 1, 0.36, 1), transform 360ms ease, opacity 160ms ease';
+    f.style.transition = 'left 260ms ease, top 260ms ease, transform 260ms ease, opacity 150ms ease';
     f.style.left = `${deckX}px`;
     f.style.top = `${deckY}px`;
-    f.style.transform = `translate(-50%,-50%) rotate(${(i % 2 ? 14 : -14)}deg) scale(0.56)`;
+    f.style.transform = `translate(-50%,-50%) rotate(${(i % 2 ? 12 : -12)}deg) scale(0.56)`;
   });
 
-  await sleep(390);
-  flyers.forEach(f => { f.style.opacity = '0'; });
+  await sleep(290);
+  flyers.forEach(f => {
+    f.style.opacity = '0';
+  });
+
   deckPile.classList.add('shuffling');
-  await sleep(380);
+  await sleep(360);
+
   flyers.forEach(f => f.remove());
   deckPile.classList.remove('shuffling');
 }
+
 
 function getPlayedRowAnchorEl(playerId){
   if (!playerId && playerId !== 0) return null;
