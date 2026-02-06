@@ -357,6 +357,11 @@
     --card-title-size:4.4px;
     --card-reading-size:3.6px;
   }
+  .player-circle.kt4-collecting .mini-card,
+  .my-hand.kt4-collecting .my-card{
+    opacity:0 !important;
+    pointer-events:none;
+  }
 
   /* ★③/④：扇カードが大小アニメ＆クリック可（使用者のみ） */
   @keyframes fanPickPulse{
@@ -1844,6 +1849,8 @@ const ui = {
   effect8Selecting: false,
   effect8Returning: false,
   effect8TargetPlayerId: null,
+
+  kt4ShuffleAnimating: false,
 
   confirmAction: null,
 };
@@ -4362,6 +4369,12 @@ function getPlayerCardRect(playerId, cardIndex){
   return cardEl.getBoundingClientRect();
 }
 
+function setKt4CollectionMask(active){
+  ui.kt4ShuffleAnimating = !!active;
+  if (playerCircle) playerCircle.classList.toggle('kt4-collecting', !!active);
+  if (myHandEl) myHandEl.classList.toggle('kt4-collecting', !!active);
+}
+
 function getHandCenterPoint(playerId){
   if (playerId === state.userId){
     const r = myHandEl?.getBoundingClientRect?.();
@@ -4388,57 +4401,63 @@ async function animateKt4ShuffleHands(counts = {}){
     .filter(v => v.pid && v.count > 0);
   if (!entries.length) return;
 
-  const flyers = [];
-  entries.forEach(({ pid, count }) => {
-    const start = getHandCenterPoint(pid);
-    for (let i = 0; i < count; i++){
-      const f = document.createElement('div');
-      f.className = 'reshuffle-flyer';
-      f.style.left = `${start.x + (((i * 9) % 18) - 9)}px`;
-      f.style.top = `${start.y + (((i * 7) % 14) - 7)}px`;
-      f.style.transform = `translate(-50%,-50%) rotate(${((i * 11) % 14) - 7}deg) scale(1)`;
-      document.body.appendChild(f);
-      flyers.push(f);
-    }
-  });
+  setKt4CollectionMask(true);
 
-  await sleep(20);
+  try {
+    const flyers = [];
+    entries.forEach(({ pid, count }) => {
+      const start = getHandCenterPoint(pid);
+      for (let i = 0; i < count; i++){
+        const f = document.createElement('div');
+        f.className = 'reshuffle-flyer';
+        f.style.left = `${start.x + (((i * 9) % 18) - 9)}px`;
+        f.style.top = `${start.y + (((i * 7) % 14) - 7)}px`;
+        f.style.transform = `translate(-50%,-50%) rotate(${((i * 11) % 14) - 7}deg) scale(1)`;
+        document.body.appendChild(f);
+        flyers.push(f);
+      }
+    });
 
-  flyers.forEach((f, i) => {
-    f.style.transition = 'left 360ms ease, top 360ms ease, transform 360ms ease';
-    f.style.left = `${cx + (((i * 13) % 24) - 12)}px`;
-    f.style.top = `${cy + (((i * 17) % 18) - 9)}px`;
-    f.style.transform = `translate(-50%,-50%) rotate(${((i * 19) % 24) - 12}deg) scale(0.96)`;
-  });
-  await sleep(380);
+    await sleep(20);
 
-  flyers.forEach((f, i) => {
-    f.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
-    f.style.left = `${cx + (((i * 5) % 30) - 15)}px`;
-    f.style.top = `${cy + (((i * 7) % 24) - 12)}px`;
-    f.style.transform = `translate(-50%,-50%) rotate(${(i % 2 ? 18 : -18)}deg) scale(0.9)`;
-  });
-  await sleep(460);
+    flyers.forEach((f, i) => {
+      f.style.transition = 'left 360ms ease, top 360ms ease, transform 360ms ease';
+      f.style.left = `${cx + (((i * 13) % 24) - 12)}px`;
+      f.style.top = `${cy + (((i * 17) % 18) - 9)}px`;
+      f.style.transform = `translate(-50%,-50%) rotate(${((i * 19) % 24) - 12}deg) scale(0.96)`;
+    });
+    await sleep(380);
 
-  let cursor = 0;
-  entries.forEach(({ pid, count }) => {
-    const end = getHandCenterPoint(pid);
-    for (let i = 0; i < count; i++){
-      const f = flyers[cursor++];
-      if (!f) continue;
-      f.style.transition = 'left 420ms cubic-bezier(0.22, 1, 0.36, 1), top 420ms cubic-bezier(0.22, 1, 0.36, 1), transform 420ms ease, opacity 160ms ease';
-      f.style.left = `${end.x + (((i * 11) % 20) - 10)}px`;
-      f.style.top = `${end.y + (((i * 9) % 14) - 7)}px`;
-      f.style.transform = `translate(-50%,-50%) rotate(${((i * 13) % 20) - 10}deg) scale(0.72)`;
-    }
-  });
+    flyers.forEach((f, i) => {
+      f.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
+      f.style.left = `${cx + (((i * 5) % 30) - 15)}px`;
+      f.style.top = `${cy + (((i * 7) % 24) - 12)}px`;
+      f.style.transform = `translate(-50%,-50%) rotate(${(i % 2 ? 18 : -18)}deg) scale(0.9)`;
+    });
+    await sleep(460);
 
-  await sleep(450);
-  flyers.forEach(f => {
-    f.style.opacity = '0';
-  });
-  await sleep(180);
-  flyers.forEach(f => f.remove());
+    let cursor = 0;
+    entries.forEach(({ pid, count }) => {
+      const end = getHandCenterPoint(pid);
+      for (let i = 0; i < count; i++){
+        const f = flyers[cursor++];
+        if (!f) continue;
+        f.style.transition = 'left 420ms cubic-bezier(0.22, 1, 0.36, 1), top 420ms cubic-bezier(0.22, 1, 0.36, 1), transform 420ms ease, opacity 160ms ease';
+        f.style.left = `${end.x + (((i * 11) % 20) - 10)}px`;
+        f.style.top = `${end.y + (((i * 9) % 14) - 7)}px`;
+        f.style.transform = `translate(-50%,-50%) rotate(${((i * 13) % 20) - 10}deg) scale(0.72)`;
+      }
+    });
+
+    await sleep(450);
+    flyers.forEach(f => {
+      f.style.opacity = '0';
+    });
+    await sleep(180);
+    flyers.forEach(f => f.remove());
+  } finally {
+    setKt4CollectionMask(false);
+  }
 }
 
 function getPlayedRowAnchorEl(playerId){
