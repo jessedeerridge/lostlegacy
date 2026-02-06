@@ -4096,7 +4096,10 @@ async function onCardPointerUp(e){
     const shouldDrop = e7drag.overSlot;
     cleanupE7Drag({ keepSourceHidden: shouldDrop });
     try { cardEl.releasePointerCapture(e.pointerId); } catch {}
-    if (shouldDrop) await handleEffect7Drop(idx);
+    if (shouldDrop){
+      const dropped = await handleEffect7Drop(idx);
+      if (!dropped) cardEl.classList.remove('drag-source-hidden');
+    }
     return;
   }
 
@@ -5628,6 +5631,7 @@ async function playCardFromHand(cardIndex){
 
   await resolveCardEffectPlaceholder(used);
   await advanceTurnToNextPlayer();
+  return true;
 }
 
 async function resolveCardEffectPlaceholder(usedCard){
@@ -6572,13 +6576,17 @@ async function handleEffect7Pick(slotIndex){
 }
 
 async function handleEffect7Drop(cardIndex){
-  if (!state.roomCode) return;
+  if (!state.roomCode) return false;
 
-  const ef = state.effect7;
-  if (!ef || ef.playerId !== state.userId || ef.phase !== 'placeBack') return;
+  const ef7 = state.effect7;
+  const efKt3 = state.effectKt3;
+  const ef = (ef7 && ef7.playerId === state.userId && ef7.phase === 'placeBack')
+    ? ef7
+    : ((efKt3 && efKt3.playerId === state.userId && efKt3.phase === 'placeBack') ? efKt3 : null);
+  if (!ef) return false;
 
   const slotIndex = Number(ef.targetSlotIndex);
-  if (!Number.isFinite(slotIndex) || slotIndex < 0 || slotIndex > 5) return;
+  if (!Number.isFinite(slotIndex) || slotIndex < 0 || slotIndex > 5) return false;
 
   const myId = state.userId;
   const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${myId}/cards`);
@@ -6591,7 +6599,7 @@ async function handleEffect7Drop(cardIndex){
     return arr;
   }, { applyLocally:false });
 
-  if (!rem.committed || removedValue == null) return;
+  if (!rem.committed || removedValue == null) return false;
 
   const localSlots = getRuinsSlots();
   if (Number.isFinite(slotIndex) && slotIndex >= 0 && slotIndex < localSlots.length){
@@ -6632,6 +6640,7 @@ async function handleEffect7Drop(cardIndex){
 
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
   await advanceTurnToNextPlayer();
+  return true;
 }
 
 /* =========================
