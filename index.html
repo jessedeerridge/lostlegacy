@@ -7853,7 +7853,7 @@ function renderPlayerCircle(players){
 
         c.addEventListener('pointerdown', (ev) => startZoomTap(ev, c));
 
-        if (kt2MineSelecting && p.id !== state.userId && !isElim){
+        if (kt2MineSelecting && p.id !== state.userId){
           c.classList.add('kt2-pickable');
           c.draggable = false;
           c.addEventListener('pointerdown', (ev) => onKt2PlayedPointerDown(ev, c));
