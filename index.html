@@ -5273,8 +5273,7 @@ async function resolveOneReveal(targetPlayerId, cardIndex, removedValue, reveali
     }
   }
 
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
-  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
+  await eliminatePlayerWithKt1Check(targetPlayerId, state.turn?.turnSeq);
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
   await advanceTurnToNextPlayer();
 }
@@ -5324,6 +5323,52 @@ async function discardHandToPlayed(playerId){
   return removed;
 }
 
+async function tryReviveWithKt1(playerId, seq = null){
+  if (!state.roomCode || !playerId) return false;
+
+  const playedSnap = await get(ref(db, `rooms/${state.roomCode}/played/${playerId}`));
+  const played = Array.isArray(playedSnap.val()) ? playedSnap.val() : [];
+  if (!played.includes('kt1')) return false;
+
+  const revivedRef = ref(db, `rooms/${state.roomCode}/kt1Revived/${playerId}`);
+  let canRevive = false;
+  const lockRes = await runTransaction(revivedRef, (used) => {
+    if (used) return used;
+    canRevive = true;
+    return true;
+  }, { applyLocally:false });
+  if (!lockRes.committed || !canRevive) return false;
+
+  const drawn = await drawOneFromDeckAtomic();
+  if (!drawn){
+    await set(revivedRef, null);
+    return false;
+  }
+
+  await emitDrawEvent(playerId, seq, 'kt1Revive');
+  await sleep(DRAW_COMMIT_DELAY_MS);
+  await addCardToHandAtomic(playerId, drawn);
+
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
+  if (state.eliminated?.[playerId]){
+    const nextEliminated = { ...(state.eliminated || {}) };
+    delete nextEliminated[playerId];
+    state.eliminated = nextEliminated;
+  }
+
+  return true;
+}
+
+async function eliminatePlayerWithKt1Check(playerId, seq = null){
+  if (!state.roomCode || !playerId) return false;
+  const revived = await tryReviveWithKt1(playerId, seq);
+  if (revived) return false;
+
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
+  state.eliminated = { ...(state.eliminated || {}), [playerId]: true };
+  return true;
+}
+
 async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealingPlayerId){
   if (!state.roomCode || !targetPlayerId) return;
 
@@ -5346,8 +5391,7 @@ async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealing
     await sleep(1500);
     await emitHandTransferEvent(revealingPlayerId, targetPlayerId, null);
     await moveAllCardsToPlayer(revealingPlayerId, targetPlayerId);
-    await set(ref(db, `rooms/${state.roomCode}/eliminated/${revealingPlayerId}`), true);
-    state.eliminated = { ...(state.eliminated || {}), [revealingPlayerId]: true };
+    await eliminatePlayerWithKt1Check(revealingPlayerId, state.turn?.turnSeq);
   }
 
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
@@ -5382,8 +5426,7 @@ async function resolveEffect4XReveal(targetPlayerId, cardIndex){
     }
   }
 
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
-  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
+  await eliminatePlayerWithKt1Check(targetPlayerId, state.turn?.turnSeq);
 
   await set(ref(db, `rooms/${state.roomCode}/effect4`), null);
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
@@ -6723,6 +6766,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
+    set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
     set(ref(db, `rooms/${state.roomCode}/gameOver`), null),
 
     set(ref(db, `rooms/${state.roomCode}/deck`), deckRaw.map(toDisplayValue)),
@@ -6775,6 +6819,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effect8`)),
 
     remove(ref(db, `${base}/eliminated`)),
+    remove(ref(db, `${base}/kt1Revived`)),
     remove(ref(db, `${base}/gameOver`)),
 
     remove(ref(db, `${base}/turn`)),
