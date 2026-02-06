@@ -5258,7 +5258,7 @@ async function animateReturnTopFromPlayerAnchorToDeck(playerId){
 
   flyer.style.transition = 'opacity 140ms ease, transform 140ms ease';
   flyer.style.opacity = '0';
-  flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.78)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(1)';
   await sleep(160);
 
   flyer.remove();
@@ -6121,14 +6121,14 @@ async function animateMoveFromPlayerToRuin(playerId, cardValue, slotIndex){
   flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
   flyer.style.left = `${endX}px`;
   flyer.style.top  = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.82)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(1)';
   await sleep(440);
 
   await waitForRuinCard(slotIndex);
 
   flyer.style.transition = 'opacity 140ms ease, transform 140ms ease';
   flyer.style.opacity = '0';
-  flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.78)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(1)';
   await sleep(160);
 
   flyer.remove();
@@ -6177,14 +6177,14 @@ async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex){
   flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
   flyer.style.left = `${endX}px`;
   flyer.style.top  = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.82)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(1)';
   await sleep(440);
 
   await waitForRuinCard(slotIndex);
 
   flyer.style.transition = 'opacity 140ms ease, transform 140ms ease';
   flyer.style.opacity = '0';
-  flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.78)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(1)';
   await sleep(160);
 
   flyer.remove();
