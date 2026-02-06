@@ -6453,6 +6453,15 @@ async function handleEffect7Pick(slotIndex){
 
   if (!res.committed || !pickedObj) return;
 
+  if (isKt3Mode){
+    await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+      ...ef,
+      phase: 'kt3Pick',
+      at: Date.now(),
+      revealedSlots: []
+    });
+  }
+
   const cardValue = String(pickedObj?.v ?? '');
 
   const localSlots = getRuinsSlots();
