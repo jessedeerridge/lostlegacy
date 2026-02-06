@@ -4197,10 +4197,11 @@ async function onRuinPointerUp(e){
 
   const slotIndex = e7pickDrag.slotIndex;
   const shouldDrop = e7pickDrag.overHand;
+  const pickMode = e7pickDrag.mode;
   cleanupE7PickDrag({ keepSourceHidden: shouldDrop });
   removeRuinPickListeners();
   if (shouldDrop){
-    if (e7pickDrag.mode === 'kt3') await handleKt3Pick(slotIndex);
+    if (pickMode === 'kt3') await handleKt3Pick(slotIndex);
     else await handleEffect7Pick(slotIndex);
   }
   e.preventDefault();
