@@ -839,6 +839,19 @@
   .ruins-card.pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
   }
+  .ruins-card.kt3-revealable{
+    pointer-events:auto;
+    cursor:pointer;
+    animation: ruinsPulse 760ms ease-in-out infinite;
+    outline:2px solid rgba(37,99,235,.0);
+  }
+  .ruins-card.kt3-revealable:hover{
+    outline:2px solid rgba(37,99,235,.55);
+  }
+  .ruins-card.kt3-revealed{
+    transform:translate(-50%,-50%) scale(1.2);
+    z-index:12;
+  }
 
   /* 位置：2行×3列（中心＝playerCircle中心＝50%/50%） */
   .ruins-slot[data-i="0"], .ruins-card[data-i="0"]{ left:calc(50% - var(--ru-gap-x)); top:calc(50% - var(--ru-half-y) + var(--ru-shift-y)); }
@@ -1918,6 +1931,10 @@ const ui = {
 
   kt4ShuffleAnimating: false,
 
+  kt3Revealing: false,
+  kt3RevealedSlots: [],
+  kt3RevealLimit: 0,
+
   confirmAction: null,
 };
 
@@ -2899,6 +2916,7 @@ function calcIsPlayable(){
   if (ui.effect3Selecting) return false;
   if (ui.effect4Selecting) return false;
   if (ui.effect6Selecting) return false;
+  if (ui.kt3Revealing) return false;
   if (ui.effect7Picking || ui.effect7Placing) return false;
   if (ui.effect8Selecting || ui.effect8Returning) return false;
 
@@ -3148,11 +3166,16 @@ function subscribeEffect7(){
     state.effect7 = snap.val() || null;
 
     const mine = state.effect7 && state.effect7.playerId === state.userId;
-    const picking = !!(mine && state.effect7.phase === 'pickRuins');
-    const placing = !!(mine && state.effect7.phase === 'placeBack');
+    const phase = state.effect7?.phase || null;
+    const picking = !!(mine && (phase === 'pickRuins' || phase === 'kt3Pick'));
+    const placing = !!(mine && (phase === 'placeBack' || phase === 'kt3Place'));
+    const kt3Revealing = !!(mine && phase === 'kt3Reveal');
 
     ui.effect7Picking = picking;
     ui.effect7Placing = placing;
+    ui.kt3Revealing = kt3Revealing;
+    ui.kt3RevealedSlots = (kt3Revealing && Array.isArray(state.effect7?.revealedSlots)) ? state.effect7.revealedSlots.map(Number) : [];
+    ui.kt3RevealLimit = kt3Revealing ? Number(state.effect7?.revealLimit || 0) : 0;
     ui.effect7TargetSlot = mine ? (state.effect7?.targetSlotIndex ?? null) : null;
     ui.effect7PickedValue = mine ? (state.effect7?.pickedValue ?? null) : null;
     if (!picking && e7pickDrag.active) cleanupE7PickDrag({ keepSourceHidden: true });
@@ -4091,7 +4114,9 @@ function onRuinPointerDown(e){
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
   if (!ui.effect7Picking) return;
-  if (!state.effect7 || state.effect7.playerId !== state.userId || state.effect7.phase !== 'pickRuins') return;
+  if (!state.effect7 || state.effect7.playerId !== state.userId) return;
+  const isKt3Mode = String(state.effect7.mode || '') === 'kt3';
+  if (!(state.effect7.phase === 'pickRuins' || (isKt3Mode && state.effect7.phase === 'kt3Pick'))) return;
 
   const slotIndex = Number(cardEl.dataset.i);
   if (!Number.isFinite(slotIndex)) return;
@@ -4246,7 +4271,7 @@ async function maybeAutoDrawAtTurnStart(){
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
 
-  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.effect7Picking || ui.effect7Placing || ui.effect8Selecting || ui.effect8Returning) return;
+  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.kt3Revealing || ui.effect7Picking || ui.effect7Placing || ui.effect8Selecting || ui.effect8Returning) return;
 
   autoDrawInFlight = true;
   const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
@@ -5530,6 +5555,10 @@ async function playCardFromHand(cardIndex){
     await resolveEffect4(myId);
     return;
   }
+  if (usedKey === 'kt3'){
+    await resolveKt3(myId);
+    return;
+  }
   if (usedKey === 'kt4'){
     await resolveKt4(myId);
     return;
@@ -6299,6 +6328,67 @@ async function handleEffect6Drop(cardIndex){
   await advanceTurnToNextPlayer();
 }
 
+async function resolveKt3(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  const ruinsSlots = getRuinsSlots();
+  const available = ruinsSlots
+    .map((slot, i) => slot ? i : null)
+    .filter((v) => v !== null);
+
+  if (!available.length){
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await update(turnRef, { paused:true });
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'kt3Reveal',
+    at: Date.now(),
+    targetSlotIndex: null,
+    pickedValue: null,
+    mode: 'kt3',
+    revealLimit: Math.min(2, available.length),
+    revealedSlots: []
+  });
+}
+
+async function handleKt3RevealPick(slotIndex){
+  if (!state.roomCode) return;
+  const ef = state.effect7;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'kt3Reveal' || String(ef.mode || '') !== 'kt3') return;
+
+  const idx = Number(slotIndex);
+  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+
+  const slots = getRuinsSlots();
+  if (!slots[idx]) return;
+
+  const revealLimit = Math.max(1, Math.min(2, Number(ef.revealLimit || 2)));
+  const current = Array.isArray(ef.revealedSlots) ? ef.revealedSlots.map(Number).filter((v) => Number.isFinite(v)) : [];
+  if (current.includes(idx)) return;
+
+  const next = [...current, idx].slice(0, revealLimit);
+  const payload = {
+    ...ef,
+    at: Date.now(),
+    revealedSlots: next,
+  };
+
+  if (next.length >= revealLimit){
+    payload.phase = 'kt3Pick';
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), payload);
+}
+
 /* =========================
    ⑦：遺跡→手札→手札→遺跡
    ========================= */
@@ -6333,10 +6423,17 @@ async function handleEffect7Pick(slotIndex){
   if (!state.roomCode) return;
 
   const ef = state.effect7;
-  if (!ef || ef.playerId !== state.userId || ef.phase !== 'pickRuins') return;
+  if (!ef || ef.playerId !== state.userId) return;
+  const isKt3Mode = String(ef.mode || '') === 'kt3';
+  if (!(ef.phase === 'pickRuins' || (isKt3Mode && ef.phase === 'kt3Pick'))) return;
 
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   const myId = state.userId;
+
+  if (isKt3Mode){
+    const allowed = Array.isArray(ef.revealedSlots) ? ef.revealedSlots.map(Number) : [];
+    if (!allowed.includes(Number(slotIndex))) return;
+  }
 
   let pickedObj = null;
 
@@ -6372,10 +6469,12 @@ async function handleEffect7Pick(slotIndex){
     id: ef.id,
     playerId: myId,
     seq: Number(ef.seq || 0),
-    phase: 'placeBack',
+    phase: isKt3Mode ? 'kt3Place' : 'placeBack',
     at: Date.now(),
     targetSlotIndex: Number(slotIndex),
-    pickedValue: cardValue
+    pickedValue: cardValue,
+    mode: isKt3Mode ? 'kt3' : 'normal',
+    revealedSlots: isKt3Mode ? [] : null
   });
 
   updateTurnUI();
@@ -6385,7 +6484,9 @@ async function handleEffect7Drop(cardIndex){
   if (!state.roomCode) return;
 
   const ef = state.effect7;
-  if (!ef || ef.playerId !== state.userId || ef.phase !== 'placeBack') return;
+  if (!ef || ef.playerId !== state.userId) return;
+  const isKt3Mode = String(ef.mode || '') === 'kt3';
+  if (!(ef.phase === 'placeBack' || (isKt3Mode && ef.phase === 'kt3Place'))) return;
 
   const slotIndex = Number(ef.targetSlotIndex);
   if (!Number.isFinite(slotIndex) || slotIndex < 0 || slotIndex > 5) return;
@@ -6904,10 +7005,11 @@ function renderRuinsArea(){
   wrap.className = 'ruins-area';
 
   const mine6Selecting = !!(ui.effect6Selecting && state.effect6 && state.effect6.playerId === state.userId && state.effect6.phase === 'select');
-  const mine7Picking   = !!(ui.effect7Picking && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'pickRuins');
-  const mine7Placing   = !!(ui.effect7Placing && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'placeBack');
+  const mine7Picking   = !!(ui.effect7Picking && state.effect7 && state.effect7.playerId === state.userId && (state.effect7.phase === 'pickRuins' || state.effect7.phase === 'kt3Pick'));
+  const mine7Placing   = !!(ui.effect7Placing && state.effect7 && state.effect7.playerId === state.userId && (state.effect7.phase === 'placeBack' || state.effect7.phase === 'kt3Place'));
+  const mineKt3Reveal  = !!(ui.kt3Revealing && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'kt3Reveal');
 
-  if (mine6Selecting || mine7Picking || mine7Placing) wrap.classList.add('drop-enabled');
+  if (mine6Selecting || mine7Picking || mine7Placing || mineKt3Reveal) wrap.classList.add('drop-enabled');
 
   const slots = getRuinsSlots();
 
@@ -6935,7 +7037,24 @@ function renderRuinsArea(){
       setCardFace(card, item);
     }
 
+    if (mineKt3Reveal){
+      const revealedSlots = Array.isArray(ui.kt3RevealedSlots) ? ui.kt3RevealedSlots.map(Number) : [];
+      card.classList.add('kt3-revealable');
+      if (revealedSlots.includes(i)){
+        card.classList.add('kt3-revealed', 'exploration-front');
+        setCardFace(card, item);
+      }
+      card.addEventListener('click', () => handleKt3RevealPick(i));
+    }
+
     if (mine7Picking){
+      if (String(state.effect7?.mode || '') === 'kt3'){
+        const allowed = Array.isArray(state.effect7?.revealedSlots) ? state.effect7.revealedSlots.map(Number) : [];
+        if (!allowed.includes(i)){
+          wrap.appendChild(card);
+          continue;
+        }
+      }
       card.classList.add('pickable');
       card.addEventListener('pointerdown', onRuinPointerDown);
       card.addEventListener('pointermove', onRuinPointerMove);
