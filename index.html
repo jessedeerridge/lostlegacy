@@ -829,15 +829,31 @@
     45%  { transform:translate(-50%,-50%) scale(1.20); }
     100% { transform:translate(-50%,-50%) scale(1); }
   }
+  .ruins-card.effect7-selectable{
+    pointer-events:auto;
+    cursor:pointer;
+    animation: ruinsPulse 760ms ease-in-out infinite;
+    outline:2px solid rgba(37,99,235,.0);
+  }
+  .ruins-card.effect7-selectable:hover,
+  .ruins-card.pickable:hover{
+    outline:2px solid rgba(37,99,235,.55);
+  }
+  .ruins-card.effect7-selected{
+    transform:translate(-50%,-50%) scale(1.2);
+    z-index:90;
+    pointer-events:auto;
+  }
+  .ruins-card.effect7-front{
+    background:#fff;
+    color:#111;
+  }
   .ruins-card.pickable{
     pointer-events:auto;
     cursor:grab;
     touch-action:none;
     animation: ruinsPulse 760ms ease-in-out infinite;
     outline:2px solid rgba(37,99,235,.0);
-  }
-  .ruins-card.pickable:hover{
-    outline:2px solid rgba(37,99,235,.55);
   }
 
   /* 位置：2行×3列（中心＝playerCircle中心＝50%/50%） */
@@ -1906,9 +1922,11 @@ const ui = {
   selectedIndex: null,
 
   effect7Picking: false,
+  effect7TakeOne: false,
   effect7Placing: false,
   effect7TargetSlot: null,
   effect7PickedValue: null,
+  effect7RevealedSlots: [],
 
   effect8Selecting: false,
   effect8Returning: false,
@@ -2899,7 +2917,7 @@ function calcIsPlayable(){
   if (ui.effect3Selecting) return false;
   if (ui.effect4Selecting) return false;
   if (ui.effect6Selecting) return false;
-  if (ui.effect7Picking || ui.effect7Placing) return false;
+  if (ui.effect7Picking || ui.effect7TakeOne || ui.effect7Placing) return false;
   if (ui.effect8Selecting || ui.effect8Returning) return false;
 
   // 脱落者は操作不可
@@ -2917,6 +2935,13 @@ function updateTurnUI(){
   myHandEl.classList.toggle('effect6-pick', ui.effect6Selecting);
   myHandEl.classList.toggle('effect7-place', ui.effect7Placing);
   myHandEl.classList.toggle('effect8-return', ui.effect8Returning);
+
+  if (ui.effect7TakeOne){
+    setHandDropHint(true);
+  } else if (!e7pickDrag.active){
+    setHandDropHint(false);
+    setHandDropActive(false);
+  }
 
   playerCircle.classList.toggle('turn-paused', !!state.turn.paused);
 
@@ -3149,13 +3174,16 @@ function subscribeEffect7(){
 
     const mine = state.effect7 && state.effect7.playerId === state.userId;
     const picking = !!(mine && state.effect7.phase === 'pickRuins');
+    const takeOne = !!(mine && state.effect7.phase === 'takeOne');
     const placing = !!(mine && state.effect7.phase === 'placeBack');
 
     ui.effect7Picking = picking;
+    ui.effect7TakeOne = takeOne;
     ui.effect7Placing = placing;
     ui.effect7TargetSlot = mine ? (state.effect7?.targetSlotIndex ?? null) : null;
     ui.effect7PickedValue = mine ? (state.effect7?.pickedValue ?? null) : null;
-    if (!picking && e7pickDrag.active) cleanupE7PickDrag({ keepSourceHidden: true });
+    ui.effect7RevealedSlots = (mine && Array.isArray(state.effect7?.revealedSlots)) ? state.effect7.revealedSlots.map((v) => Number(v)).filter((v) => Number.isFinite(v)) : [];
+    if (!takeOne && e7pickDrag.active) cleanupE7PickDrag({ keepSourceHidden: true });
 
     updateTurnUI();
     renderHands();
@@ -4090,11 +4118,19 @@ function onRuinPointerDown(e){
 
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
-  if (!ui.effect7Picking) return;
-  if (!state.effect7 || state.effect7.playerId !== state.userId || state.effect7.phase !== 'pickRuins') return;
+  if (!state.effect7 || state.effect7.playerId !== state.userId) return;
 
   const slotIndex = Number(cardEl.dataset.i);
   if (!Number.isFinite(slotIndex)) return;
+
+  if (ui.effect7Picking && state.effect7.phase === 'pickRuins'){
+    handleEffect7Reveal(slotIndex);
+    e.preventDefault();
+    return;
+  }
+
+  if (!ui.effect7TakeOne || state.effect7.phase !== 'takeOne') return;
+  if (!Array.isArray(ui.effect7RevealedSlots) || !ui.effect7RevealedSlots.includes(slotIndex)) return;
 
   e7pickDrag.active = true;
   e7pickDrag.slotIndex = slotIndex;
@@ -4246,7 +4282,7 @@ async function maybeAutoDrawAtTurnStart(){
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
 
-  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.effect7Picking || ui.effect7Placing || ui.effect8Selecting || ui.effect8Returning) return;
+  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.effect7Picking || ui.effect7TakeOne || ui.effect7Placing || ui.effect8Selecting || ui.effect8Returning) return;
 
   autoDrawInFlight = true;
   const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
@@ -6325,7 +6361,42 @@ async function resolveEffect7(playerId){
     at: Date.now(),
     targetSlotIndex: null,
     pickedValue: null,
-    mode: 'normal'
+    mode: 'normal',
+    revealedSlots: []
+  });
+}
+
+async function handleEffect7Reveal(slotIndex){
+  if (!state.roomCode) return;
+
+  const ef = state.effect7;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'pickRuins') return;
+
+  const slotsNow = getRuinsSlots();
+  const filled = slotsNow.map((s, i) => s ? i : null).filter((v) => v !== null);
+  const maxReveal = Math.min(2, filled.length);
+  if (maxReveal <= 0) return;
+
+  const idx = Number(slotIndex);
+  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+  if (!slotsNow[idx]) return;
+
+  const revealed = Array.isArray(ef.revealedSlots) ? ef.revealedSlots.map((v) => Number(v)).filter((v) => Number.isFinite(v)) : [];
+  if (revealed.includes(idx)) return;
+
+  const next = [...revealed, idx];
+  const nextPhase = next.length >= maxReveal ? 'takeOne' : 'pickRuins';
+
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    id: ef.id,
+    playerId: state.userId,
+    seq: Number(ef.seq || 0),
+    phase: nextPhase,
+    at: Date.now(),
+    targetSlotIndex: ef.targetSlotIndex ?? null,
+    pickedValue: ef.pickedValue ?? null,
+    mode: ef.mode || 'normal',
+    revealedSlots: next,
   });
 }
 
@@ -6333,10 +6404,13 @@ async function handleEffect7Pick(slotIndex){
   if (!state.roomCode) return;
 
   const ef = state.effect7;
-  if (!ef || ef.playerId !== state.userId || ef.phase !== 'pickRuins') return;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'takeOne') return;
 
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   const myId = state.userId;
+
+  const revealedSlots = Array.isArray(ef.revealedSlots) ? ef.revealedSlots.map((v) => Number(v)).filter((v) => Number.isFinite(v)) : [];
+  if (!revealedSlots.includes(Number(slotIndex))) return;
 
   let pickedObj = null;
 
@@ -6375,7 +6449,9 @@ async function handleEffect7Pick(slotIndex){
     phase: 'placeBack',
     at: Date.now(),
     targetSlotIndex: Number(slotIndex),
-    pickedValue: cardValue
+    pickedValue: cardValue,
+    mode: ef.mode || 'normal',
+    revealedSlots: []
   });
 
   updateTurnUI();
@@ -6428,9 +6504,11 @@ async function handleEffect7Drop(cardIndex){
   await set(ref(db, `rooms/${state.roomCode}/effect7`), null);
 
   ui.effect7Picking = false;
+  ui.effect7TakeOne = false;
   ui.effect7Placing = false;
   ui.effect7TargetSlot = null;
   ui.effect7PickedValue = null;
+  ui.effect7RevealedSlots = [];
   updateTurnUI();
   renderMyHand();
 
@@ -6905,9 +6983,10 @@ function renderRuinsArea(){
 
   const mine6Selecting = !!(ui.effect6Selecting && state.effect6 && state.effect6.playerId === state.userId && state.effect6.phase === 'select');
   const mine7Picking   = !!(ui.effect7Picking && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'pickRuins');
+  const mine7TakeOne   = !!(ui.effect7TakeOne && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'takeOne');
   const mine7Placing   = !!(ui.effect7Placing && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'placeBack');
 
-  if (mine6Selecting || mine7Picking || mine7Placing) wrap.classList.add('drop-enabled');
+  if (mine6Selecting || mine7Picking || mine7TakeOne || mine7Placing) wrap.classList.add('drop-enabled');
 
   const slots = getRuinsSlots();
 
@@ -6935,7 +7014,22 @@ function renderRuinsArea(){
       setCardFace(card, item);
     }
 
+    const isRevealed = ui.effect7RevealedSlots.includes(i);
+    if (isRevealed){
+      card.classList.add('effect7-front');
+      setCardFace(card, item?.v ?? item ?? '');
+    }
+
     if (mine7Picking){
+      if (isRevealed){
+        card.classList.add('effect7-selected');
+      } else {
+        card.classList.add('effect7-selectable');
+      }
+      card.addEventListener('pointerdown', onRuinPointerDown);
+    }
+
+    if (mine7TakeOne && isRevealed){
       card.classList.add('pickable');
       card.addEventListener('pointerdown', onRuinPointerDown);
       card.addEventListener('pointermove', onRuinPointerMove);
