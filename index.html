@@ -5686,19 +5686,19 @@ async function animateKt7PairCollectToCenter(slotIndexes = []){
 
   await sleep(20);
   flyers.forEach((flyer, i) => {
-    const tilt = i === 0 ? 2 : -2;
+    const tilt = 2;
     flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
     flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(0.96)`;
-    flyer.style.left = `${cx + (i === 0 ? -10 : 10)}px`;
+    flyer.style.left = `${cx + (i === 0 ? 0 : 1)}px`;
     flyer.style.top = `${cy - 8}px`;
   });
 
   await sleep(220);
   flyers.forEach((flyer, i) => {
-    const tilt = i === 0 ? -2 : 2;
+    const tilt = 2;
     flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
     flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(1.02)`;
-    flyer.style.left = `${cx + (i === 0 ? -5 : 5)}px`;
+    flyer.style.left = `${cx + (i === 0 ? 0 : 1)}px`;
     flyer.style.top = `${cy + 4}px`;
   });
 
