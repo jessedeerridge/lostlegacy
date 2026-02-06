@@ -1618,7 +1618,9 @@ const RUIN_TAKE_ANIM_MS = 760;
 const KT7_COLLECT_ANIM_MS = 980;
 const KT7_RETURN_ANIM_MS = 980;
 const KT5_COLLECT_ANIM_MS = 980;
-const KT5_RETURN_ANIM_MS = 980;
+const KT5_SHUFFLE_ANIM_MS = 980;
+const KT5_RETURN_ANIM_MS = 760;
+const KT5_POST_LAND_DELAY_MS = 1500;
 const FIVE_SLIDE_IN_MS = 600;
 const FIVE_SLIDE_HOLD_MS = 1200;
 const FIVE_SLIDE_OUT_MS = 520;
@@ -5908,27 +5910,13 @@ async function animateKt5CollectAllToCenter(slotIndexes = []){
   await sleep(220);
 }
 
-async function animateKt5ReturnFromCenter(slotIndexes = []){
-  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 5);
-  if (!idxs.length) return;
+async function animateKt5ShuffleAtCenter(){
+  let flyers = Array.isArray(kt5ShuffleAnimSession?.flyers) ? kt5ShuffleAnimSession.flyers.filter(Boolean) : [];
+  if (!flyers.length) return;
 
   const pc = playerCircle.getBoundingClientRect();
   const cx = pc.left + pc.width/2;
   const cy = pc.top + pc.height/2 + RUINS_SHIFT_Y;
-
-  let flyers = Array.isArray(kt5ShuffleAnimSession?.flyers) ? kt5ShuffleAnimSession.flyers.filter(Boolean) : [];
-  if (!flyers.length){
-    flyers = idxs.map((_, i) => {
-      const flyer = document.createElement('div');
-      flyer.className = 'reshuffle-flyer';
-      flyer.style.left = `${cx + (((i * 11) % 16) - 8)}px`;
-      flyer.style.top = `${cy + (((i * 7) % 12) - 6)}px`;
-      flyer.style.transform = `translate(-50%,-50%) rotate(${((i * 13) % 18) - 9}deg) scale(1)`;
-      flyer.style.zIndex = String(4300 + i);
-      document.body.appendChild(flyer);
-      return flyer;
-    });
-  }
 
   const stackPoints = flyers.map((_, i) => ({
     x: cx + (((i * 3) % 8) - 4),
@@ -5982,6 +5970,14 @@ async function animateKt5ReturnFromCenter(slotIndexes = []){
     await sleep(DUR);
     await sleep(PAUSE);
   }
+}
+
+async function animateKt5ReturnFromCenter(slotIndexes = []){
+  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 5);
+  if (!idxs.length) return;
+
+  let flyers = Array.isArray(kt5ShuffleAnimSession?.flyers) ? kt5ShuffleAnimSession.flyers.filter(Boolean) : [];
+  if (!flyers.length) return;
 
   flyers.forEach((flyer, i) => {
     const slotIndex = idxs[i] ?? idxs[0];
@@ -6010,6 +6006,14 @@ function runKt5PhaseAnimations(raw){
     }
   }
 
+  if (phase === 'shufflingAll'){
+    const key = `${id}:${raw?.at || ''}:shuffle`;
+    if (key !== lastKt5ReturnAnimKey){
+      lastKt5ReturnAnimKey = key;
+      animateKt5ShuffleAtCenter();
+    }
+  }
+
   if (phase === 'returnAll'){
     const key = `${id}:${raw?.at || ''}:return`;
     if (key !== lastKt5ReturnAnimKey){
@@ -6018,6 +6022,7 @@ function runKt5PhaseAnimations(raw){
     }
   }
 }
+
 async function animateTakeFromRuinToMyHand(slotIndex, cardValue){
   const { x:startX, y:startY } = getRuinSlotCenterByIndex(slotIndex);
 
@@ -6164,12 +6169,21 @@ async function animateKt5MoveFromPlayedToRuin(playerId, cardValue, slotIndex){
 
   const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
 
+  const sourceCardEl = rowEl?.querySelector('.played-card[data-value="kt5"]:last-child') || rowEl?.querySelector('.played-card:last-child');
+  const sourceRect = sourceCardEl?.getBoundingClientRect?.() || null;
+
   const flyer = document.createElement('div');
-  flyer.className = 'front-flyer face-flyer ruin-reveal-flyer';
+  flyer.className = 'played-card ruin-reveal-flyer';
+  flyer.style.position = 'fixed';
+  flyer.style.pointerEvents = 'none';
+  flyer.style.zIndex = '9999';
+  flyer.style.margin = '0';
+  flyer.style.width = `${sourceRect?.width || 42}px`;
+  flyer.style.height = `${sourceRect?.height || 62}px`;
   setCardFace(flyer, cardValue);
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1.05)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1)';
   document.body.appendChild(flyer);
 
   await sleep(0);
@@ -6181,7 +6195,7 @@ async function animateKt5MoveFromPlayedToRuin(playerId, cardValue, slotIndex){
   flyer.style.transition = 'left 520ms cubic-bezier(0.22, 1, 0.36, 1), top 520ms cubic-bezier(0.22, 1, 0.36, 1), transform 520ms cubic-bezier(0.22, 1, 0.36, 1)';
   flyer.style.left = `${endX}px`;
   flyer.style.top  = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(0.7)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(1)';
   await sleep(540);
 
   flyer.style.transition = 'background 120ms ease, color 120ms ease, opacity 120ms ease';
@@ -7406,6 +7420,18 @@ async function resolveKt5(playerId){
 
   await sleep(KT5_COLLECT_ANIM_MS);
 
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    mode: 'kt5',
+    phase: 'shufflingAll',
+    at: Date.now(),
+    selectedSlots: filledIndexes,
+  });
+
+  await sleep(KT5_SHUFFLE_ANIM_MS);
+
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   let shuffledIndexes = [];
   await runTransaction(ruinsRef, (ruins) => {
@@ -7443,6 +7469,7 @@ async function resolveKt5(playerId){
   await sleep(KT5_RETURN_ANIM_MS);
 
   await set(ref(db, `rooms/${state.roomCode}/effect7`), null);
+  await sleep(KT5_POST_LAND_DELAY_MS);
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
   await advanceTurnToNextPlayer();
 }
@@ -8404,7 +8431,7 @@ function renderRuinsArea(){
     if (Array.isArray(ui.kt7ReturnAnimatingSlots) && ui.kt7ReturnAnimatingSlots.includes(i)){
       card.classList.add('effect7-ghost-hidden');
     }
-    if ((kt5Phase === 'collectAll' || kt5Phase === 'returnAll') && Array.isArray(efKt5?.selectedSlots) && efKt5.selectedSlots.map(Number).includes(i)){
+    if ((kt5Phase === 'collectAll' || kt5Phase === 'shufflingAll' || kt5Phase === 'returnAll') && Array.isArray(efKt5?.selectedSlots) && efKt5.selectedSlots.map(Number).includes(i)){
       card.classList.add('effect7-ghost-hidden');
     }
 
