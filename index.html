@@ -398,6 +398,10 @@
     --card-title-size:8px;
     --card-reading-size:6px;
   }
+  .played-card.kt1-used{
+    outline:2px solid rgba(234,179,8,.95);
+    outline-offset:1px;
+  }
 
   .card-face{
     position:absolute;
@@ -1571,15 +1575,15 @@ function getCardEffectText(value){
     case 'kt4':
       return '全員の手札を混ぜて配りなおす。その後、誰か1人の手札を見る。';
     case 'kt5':
-      return 'ききき';
+      return 'このカードを遺跡に置く。その後、遺跡のカードをシャッフルする。';
     case 'kt6':
-      return 'ててて';
+      return '山札の一番上のカードを見て遺跡に置く。その後、他プレイヤーの捨て札を一枚選んで遺跡に置く。その後、その2枚をよく混ぜる。';
     case 'kt7':
-      return 'じゅじゅじゅ';
+      return '遺跡のカード2枚を選んでよく混ぜる。その後、遺跡のカード1枚を選んで見る。';
     case 'kt8':
-      return 'れれれ';
+      return '5と✕以外の数字を宣言して誰かのカードを見る。当たっているならそのカードを遺跡に置く。そのプレイヤーを脱落させる。';
     case 'ktx':
-      return 'さささ';
+      return '捨て札にこのカードが2枚あれば、手札を遺跡に置いて、脱落する。';
     default:
       return '';
   }
@@ -1812,6 +1816,7 @@ const state = {
   effect8: null,
 
   eliminated: {},     // ★脱落者
+  kt1Revived: {},     // ★kt1復帰済み
   gameOver: null,     // ★ゲーム終了
 
   turn: { currentPlayerId:null, turnSeq:0, drawn:false, paused:false },
@@ -1915,7 +1920,7 @@ const DECK_SETS = [
   {
     id: 'starship',
     name: '星を渡る船',
-    cards: [3,4,5],
+    cards: [3,4,5,"✕","✕","✕","✕"],
     helpRows: [
       [1,2,3,4,5],
       [6,7,8,'x'],
@@ -2842,6 +2847,14 @@ function subscribeEliminated(){
     state.eliminated = snap.val() || {};
     updateTurnUI();
     scheduleLastSurvivorCheck();
+  });
+}
+
+function subscribeKt1Revived(){
+  const kRef = ref(db, `rooms/${state.roomCode}/kt1Revived`);
+  onValue(kRef, snap => {
+    state.kt1Revived = snap.val() || {};
+    renderHands();
   });
 }
 
@@ -5273,8 +5286,7 @@ async function resolveOneReveal(targetPlayerId, cardIndex, removedValue, reveali
     }
   }
 
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
-  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
+  await eliminatePlayerWithKt1Check(targetPlayerId, state.turn?.turnSeq);
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
   await advanceTurnToNextPlayer();
 }
@@ -5324,6 +5336,52 @@ async function discardHandToPlayed(playerId){
   return removed;
 }
 
+async function tryReviveWithKt1(playerId, seq = null){
+  if (!state.roomCode || !playerId) return false;
+
+  const playedSnap = await get(ref(db, `rooms/${state.roomCode}/played/${playerId}`));
+  const played = Array.isArray(playedSnap.val()) ? playedSnap.val() : [];
+  if (!played.includes('kt1')) return false;
+
+  const revivedRef = ref(db, `rooms/${state.roomCode}/kt1Revived/${playerId}`);
+  let canRevive = false;
+  const lockRes = await runTransaction(revivedRef, (used) => {
+    if (used) return used;
+    canRevive = true;
+    return true;
+  }, { applyLocally:false });
+  if (!lockRes.committed || !canRevive) return false;
+
+  const drawn = await drawOneFromDeckAtomic();
+  if (!drawn){
+    await set(revivedRef, null);
+    return false;
+  }
+
+  await emitDrawEvent(playerId, seq, 'kt1Revive');
+  await sleep(DRAW_COMMIT_DELAY_MS);
+  await addCardToHandAtomic(playerId, drawn);
+
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
+  if (state.eliminated?.[playerId]){
+    const nextEliminated = { ...(state.eliminated || {}) };
+    delete nextEliminated[playerId];
+    state.eliminated = nextEliminated;
+  }
+
+  return true;
+}
+
+async function eliminatePlayerWithKt1Check(playerId, seq = null){
+  if (!state.roomCode || !playerId) return false;
+  const revived = await tryReviveWithKt1(playerId, seq);
+  if (revived) return false;
+
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
+  state.eliminated = { ...(state.eliminated || {}), [playerId]: true };
+  return true;
+}
+
 async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealingPlayerId){
   if (!state.roomCode || !targetPlayerId) return;
 
@@ -5346,8 +5404,7 @@ async function resolveXReveal(targetPlayerId, cardIndex, removedValue, revealing
     await sleep(1500);
     await emitHandTransferEvent(revealingPlayerId, targetPlayerId, null);
     await moveAllCardsToPlayer(revealingPlayerId, targetPlayerId);
-    await set(ref(db, `rooms/${state.roomCode}/eliminated/${revealingPlayerId}`), true);
-    state.eliminated = { ...(state.eliminated || {}), [revealingPlayerId]: true };
+    await eliminatePlayerWithKt1Check(revealingPlayerId, state.turn?.turnSeq);
   }
 
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
@@ -5382,8 +5439,7 @@ async function resolveEffect4XReveal(targetPlayerId, cardIndex){
     }
   }
 
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${targetPlayerId}`), true);
-  state.eliminated = { ...(state.eliminated || {}), [targetPlayerId]: true };
+  await eliminatePlayerWithKt1Check(targetPlayerId, state.turn?.turnSeq);
 
   await set(ref(db, `rooms/${state.roomCode}/effect4`), null);
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
@@ -6119,6 +6175,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeRuins();
 
   subscribeEliminated();
+  subscribeKt1Revived();
   subscribeGameOver();
 
   subscribeEffect2();
@@ -6630,7 +6687,19 @@ function renderPlayerCircle(players){
       const cardRotate = toCenterDeg + 90;
 
       const MAX_SHOW = 10;
-      const slice = playedArr.slice(Math.max(0, playedArr.length - MAX_SHOW));
+      const sliceStart = Math.max(0, playedArr.length - MAX_SHOW);
+      const slice = playedArr.slice(sliceStart);
+
+      const kt1Used = !!state.kt1Revived?.[p.id];
+      let usedKt1Index = -1;
+      if (kt1Used){
+        for (let i = playedArr.length - 1; i >= 0; i--){
+          if (String(playedArr[i]) === 'kt1'){
+            usedKt1Index = i;
+            break;
+          }
+        }
+      }
 
       const parallel = (p.id !== state.userId) && (slice.length === 2 || slice.length === 3 || slice.length === 4);
 
@@ -6642,15 +6711,22 @@ function renderPlayerCircle(players){
           `translate(-50%,-50%) translate(${ox}px, ${oy}px)`;
       }
 
-      slice.forEach(v => {
+      slice.forEach((v, localIndex) => {
         const c = document.createElement('div');
         c.className = 'played-card';
         setCardFace(c, v);
 
+        const absIndex = sliceStart + localIndex;
+        const isUsedKt1 = (absIndex === usedKt1Index) && (String(v) === 'kt1');
+
         if (!parallel){
-          c.style.transform = `rotate(${cardRotate}deg)`;
+          c.style.transform = `rotate(${cardRotate + (isUsedKt1 ? 90 : 0)}deg)`;
         } else {
-          c.style.transform = `rotate(0deg)`;
+          c.style.transform = `rotate(${isUsedKt1 ? 90 : 0}deg)`;
+        }
+
+        if (isUsedKt1){
+          c.classList.add('kt1-used');
         }
 
         c.addEventListener('pointerdown', (ev) => startZoomTap(ev, c));
@@ -6723,6 +6799,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
+    set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
     set(ref(db, `rooms/${state.roomCode}/gameOver`), null),
 
     set(ref(db, `rooms/${state.roomCode}/deck`), deckRaw.map(toDisplayValue)),
@@ -6775,6 +6852,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effect8`)),
 
     remove(ref(db, `${base}/eliminated`)),
+    remove(ref(db, `${base}/kt1Revived`)),
     remove(ref(db, `${base}/gameOver`)),
 
     remove(ref(db, `${base}/turn`)),
