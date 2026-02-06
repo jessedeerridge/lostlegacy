@@ -4879,6 +4879,12 @@ function getPlayerCardAnchorEl(playerId, cardIndex){
   return playerCircle.querySelector(`.mini-card[data-pid="${playerId}"][data-idx="${cardIndex}"]`);
 }
 
+function getRuinCardAnchorEl(slotIndex){
+  if (!Number.isFinite(Number(slotIndex))) return null;
+  return playerCircle.querySelector(`.ruins-card[data-i="${Number(slotIndex)}"]`)
+    || playerCircle.querySelector(`.ruins-slot[data-i="${Number(slotIndex)}"]`);
+}
+
 function getPlayerCardRect(playerId, cardIndex){
   if (!Number.isFinite(Number(cardIndex))) return null;
   const idx = Number(cardIndex);
@@ -7994,8 +8000,11 @@ function renderRuinsArea(){
     }
 
     if (kt7Phase === 'confirm' && Number(efKt7?.revealedSlotIndex) === i){
-      card.classList.add('effect7-revealed', 'exploration-front');
-      setCardFace(card, efKt7?.revealedValue ?? item?.v ?? item);
+      card.classList.add('effect7-revealed');
+      if (kt7Mine){
+        card.classList.add('exploration-front');
+        setCardFace(card, efKt7?.revealedValue ?? item?.v ?? item);
+      }
     }
 
     wrap.appendChild(card);
@@ -8009,6 +8018,7 @@ function renderEffectArrowLayer(players){
   const ef3 = state.effect3;
   const ef4 = state.effect4;
   const ef8 = state.effect8;
+  const efKt7 = state.effectKt7;
 
   let config = null;
 
@@ -8031,6 +8041,16 @@ function renderEffectArrowLayer(players){
       showEye: true,
       bothEnds: false,
       show: state.userId !== ef4.playerId,
+    };
+  } else if (efKt7 && String(efKt7.mode || '') === 'kt7' && efKt7.phase === 'confirm' && efKt7.playerId && Number.isFinite(Number(efKt7.revealedSlotIndex))){
+    config = {
+      fromPid: efKt7.playerId,
+      toPid: null,
+      toRuinSlotIndex: Number(efKt7.revealedSlotIndex),
+      targetCardIndex: null,
+      showEye: true,
+      bothEnds: false,
+      show: state.userId !== efKt7.playerId,
     };
   } else if (ef8 && ef8.playerId && ef8.targetPlayerId && (ef8.phase === 'return' || ef8.phase === 'guess' || ef8.phase === 'guessResult')){
     const isKt8 = String(ef8.mode || '') === 'kt8';
@@ -8113,9 +8133,11 @@ function renderEffectArrowLayer(players){
 
   requestAnimationFrame(() => {
     const fromEl = getPlayerAnchorEl(config.fromPid);
-    const toEl = config.showEye
-      ? (getPlayerCardAnchorEl(config.toPid, config.targetCardIndex) || getPlayerAnchorEl(config.toPid))
-      : getPlayerAnchorEl(config.toPid);
+    const toEl = Number.isFinite(Number(config.toRuinSlotIndex))
+      ? getRuinCardAnchorEl(config.toRuinSlotIndex)
+      : (config.showEye
+        ? (getPlayerCardAnchorEl(config.toPid, config.targetCardIndex) || getPlayerAnchorEl(config.toPid))
+        : getPlayerAnchorEl(config.toPid));
     if (!fromEl || !toEl) return;
 
     const fr = fromEl.getBoundingClientRect();
