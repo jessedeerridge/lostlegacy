@@ -415,6 +415,13 @@
     outline:2px solid rgba(37,99,235,.55);
     outline-offset:1px;
   }
+  .played-card.kt6-pickable{
+    cursor:pointer;
+    touch-action:none;
+    animation: fanPickPulse 760ms ease-in-out infinite;
+    outline:2px solid rgba(56,189,248,.55);
+    outline-offset:1px;
+  }
   .played-card.drag-source-hidden{
     opacity:0 !important;
     pointer-events:none !important;
@@ -1560,6 +1567,7 @@
 <div id="confirmPop" class="confirm-pop hidden">
   <div class="msg" id="confirmMsg">閉じてもいいですか</div>
   <div class="spacer"></div>
+  <button class="btn hidden" id="btnConfirmNo">いいえ</button>
   <button class="btn primary" id="btnConfirmYes">はい</button>
 </div>
 
@@ -1943,6 +1951,7 @@ const state = {
   effectKt3: null,
   effectKt2: null,
   effectKt7: null,
+  effectKt6: null,
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
@@ -1986,6 +1995,7 @@ const ui = {
   effect8TargetPlayerId: null,
 
   effectKt2Selecting: false,
+  effectKt6SelectingDiscard: false,
 
   kt8Guessing: false,
   kt8GuessOptions: [],
@@ -1994,6 +2004,7 @@ const ui = {
   kt7ReturnAnimatingSlots: [],
 
   confirmAction: null,
+  confirmNoAction: null,
 };
 
 const mainEl = document.getElementById('main');
@@ -2045,6 +2056,7 @@ const zoomCardEl = document.getElementById('zoomCard');
 
 const confirmPop = document.getElementById('confirmPop');
 const confirmMsg = document.getElementById('confirmMsg');
+const btnConfirmNo = document.getElementById('btnConfirmNo');
 const btnConfirmYes = document.getElementById('btnConfirmYes');
 const kt8GuessPanel = document.getElementById('kt8GuessPanel');
 
@@ -2196,23 +2208,36 @@ helpBtn.addEventListener('click', () => { if (joinBox.classList.contains('hidden
 btnHelpClose.addEventListener('click', closeHelp);
 helpBackdrop.addEventListener('click', (e) => { if (e.target === helpBackdrop) closeHelp(); });
 
+btnConfirmNo.addEventListener('click', async () => {
+  if (typeof ui.confirmNoAction === 'function'){
+    const fn = ui.confirmNoAction;
+    hideConfirmPop();
+    await fn();
+    return;
+  }
+  hideConfirmPop();
+});
+
 btnConfirmYes.addEventListener('click', async () => {
   if (typeof ui.confirmAction === 'function'){
     const fn = ui.confirmAction;
-    ui.confirmAction = null;
     hideConfirmPop();
     await fn();
   }
 });
 
-function showConfirmPop(text, onYes){
+function showConfirmPop(text, onYes, onNo = null){
   confirmMsg.textContent = text || '閉じてもいいですか';
   ui.confirmAction = onYes;
+  ui.confirmNoAction = (typeof onNo === 'function') ? onNo : null;
+  if (btnConfirmNo) btnConfirmNo.classList.toggle('hidden', !ui.confirmNoAction);
   confirmPop.classList.remove('hidden');
 }
 function hideConfirmPop(){
   confirmPop.classList.add('hidden');
   ui.confirmAction = null;
+  ui.confirmNoAction = null;
+  if (btnConfirmNo) btnConfirmNo.classList.add('hidden');
 }
 
 function showKt8GuessPanel(options, onPick){
@@ -2913,6 +2938,7 @@ let lastOneRevealEventId = null;
 let lastExplorationEventId = null;
 let lastKt4ShuffleEventId = null;
 let lastKt2ShuffleEventId = null;
+let lastKt6ShuffleEventId = null;
 let lastKt7CollectAnimKey = null;
 let lastKt7ReturnAnimKey = null;
 let kt7PairAnimSession = null;
@@ -2998,6 +3024,7 @@ function calcIsPlayable(){
   if (ui.effectKt7SelectingPair || ui.effectKt7Inspecting) return false;
   if (ui.effect8Selecting || ui.effect8Returning) return false;
   if (ui.effectKt2Selecting) return false;
+  if (ui.effectKt6SelectingDiscard) return false;
 
   // 脱落者は操作不可
   if (state.eliminated?.[myId]) return false;
@@ -3246,6 +3273,33 @@ function subscribeEffectKt2(){
         setDeckDropHint(false);
         setDeckDropActive(false);
       }
+    }
+
+    updateTurnUI();
+    renderHands();
+  });
+}
+
+function subscribeEffectKt6(){
+  const eRef = ref(db, `rooms/${state.roomCode}/effectKt6`);
+  onValue(eRef, snap => {
+    state.effectKt6 = snap.val() || null;
+    const ef = state.effectKt6;
+    const mine = ef && ef.playerId === state.userId;
+    const selecting = !!(mine && ef.phase === 'selectPlayed');
+    ui.effectKt6SelectingDiscard = selecting;
+
+    if (mine && ef && ef.phase === 'confirmShuffle' && !state.gameOver){
+      showConfirmPop('この2枚をシャッフルしますか？', async () => {
+        await finishKt6Shuffle();
+      }, async () => {
+        await cancelKt6ShuffleSelection();
+      });
+    } else if (!(state.effect3?.playerId === state.userId && state.effect3?.phase === 'confirm')
+      && !(state.effect4?.playerId === state.userId && state.effect4?.phase === 'confirm')
+      && !(state.effect8?.playerId === state.userId && state.effect8?.phase === 'guessResult')
+      && !(state.effectKt7?.playerId === state.userId && state.effectKt7?.phase === 'confirm')){
+      hideConfirmPop();
     }
 
     updateTurnUI();
@@ -3573,6 +3627,23 @@ function subscribeKt2ShuffleEvent(){
   });
 }
 
+function subscribeKt6ShuffleEvent(){
+  const evRef = ref(db, `rooms/${state.roomCode}/kt6ShuffleEvent`);
+  onValue(evRef, snap => {
+    const ev = snap.val();
+    if (!ev || !ev.id) return;
+    if (ev.id === lastKt6ShuffleEventId) return;
+    lastKt6ShuffleEventId = ev.id;
+
+    const now = Date.now();
+    if (ev.at && (now - ev.at) > 15000) return;
+
+    const slots = Array.isArray(ev.slotIndexes) ? ev.slotIndexes.map(Number).filter(n => Number.isFinite(n)).slice(0,2) : [];
+    const hintSlotIndex = Number.isFinite(Number(ev.hintSlotIndex)) ? Number(ev.hintSlotIndex) : null;
+    animateKt6ShufflePair(slots, hintSlotIndex);
+  });
+}
+
 function subscribeRuinMoveEvent(){
   const evRef = ref(db, `rooms/${state.roomCode}/ruinMoveEvent`);
   onValue(evRef, snap => {
@@ -3591,7 +3662,7 @@ function subscribeRuinMoveEvent(){
     const fromPlayedIndex = Number(ev.fromPlayedIndex);
 
     if (!fromPid) return;
-    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played') return;
+    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played' && mode !== 'kt6Top') return;
 
     if (mode === 'oneReveal' || mode === 'kt8'){
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
@@ -3612,8 +3683,12 @@ function subscribeRuinMoveEvent(){
       }
       return;
     }
-    if (mode === 'kt5Played'){
-      animateMoveFromPlayedToRuin(fromPid, fromPlayedIndex, slotIndex);
+    if (mode === 'kt5Played' || mode === 'kt6Played'){
+      animateMoveFromPlayedToRuin(fromPid, fromPlayedIndex, slotIndex, mode === 'kt6Played');
+      return;
+    }
+    if (mode === 'kt6Top'){
+      animateMoveFromDeckToRuin(slotIndex, fromPid === state.userId ? String(cardValue ?? '') : null);
       return;
     }
 
@@ -4790,6 +4865,18 @@ async function emitKt2ShuffleEvent(count = 1, byPlayerId = null){
     byPlayerId: byPlayerId || null,
     fromPlayerId: null,
     fromPlayedIndex: null,
+    at: Date.now(),
+  });
+}
+
+async function emitKt6ShuffleEvent(slotIndexes = [], byPlayerId = null, hintSlotIndex = null){
+  if (!state.roomCode) return;
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/kt6ShuffleEvent`), {
+    id,
+    slotIndexes: Array.isArray(slotIndexes) ? slotIndexes.map(Number).filter(n => Number.isFinite(n)).slice(0,2) : [],
+    byPlayerId: byPlayerId || null,
+    hintSlotIndex: Number.isFinite(Number(hintSlotIndex)) ? Number(hintSlotIndex) : null,
     at: Date.now(),
   });
 }
@@ -6148,7 +6235,7 @@ async function animateMoveFromPlayerToRuin(playerId, cardValue, slotIndex){
   flyer.remove();
 }
 
-async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex){
+async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex, faceUp = false){
   let startX;
   let startY;
   const cardEl = Number.isFinite(Number(playedIndex))
@@ -6176,7 +6263,8 @@ async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex){
   const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
 
   const flyer = document.createElement('div');
-  flyer.className = 'back-flyer';
+  flyer.className = faceUp ? 'front-flyer face-flyer ruin-reveal-flyer' : 'back-flyer';
+  if (faceUp) setCardFace(flyer, cardEl?.dataset?.value || '');
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1)';
@@ -6202,6 +6290,76 @@ async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex){
   await sleep(160);
 
   flyer.remove();
+}
+
+async function animateMoveFromDeckToRuin(slotIndex, faceValue = null){
+  const dr = deckPile.getBoundingClientRect();
+  const startX = dr.left + dr.width / 2;
+  const startY = dr.top + dr.height / 2;
+  const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
+
+  const flyer = document.createElement('div');
+  if (faceValue){
+    flyer.className = 'front-flyer face-flyer ruin-reveal-flyer';
+    setCardFace(flyer, faceValue);
+  } else {
+    flyer.className = 'back-flyer';
+  }
+  flyer.style.left = `${startX}px`;
+  flyer.style.top  = `${startY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1)';
+  document.body.appendChild(flyer);
+
+  await sleep(0);
+  flyer.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
+  flyer.style.left = `${endX}px`;
+  flyer.style.top  = `${endY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(1)';
+  await sleep(440);
+
+  flyer.style.transition = 'opacity 140ms ease';
+  flyer.style.opacity = '0';
+  await sleep(150);
+  flyer.remove();
+}
+
+async function animateKt6ShufflePair(slotIndexes = [], hintSlotIndex = null){
+  const slots = Array.isArray(slotIndexes) ? slotIndexes : [];
+  if (slots.length < 2) return;
+  const a = getRuinSlotCenterByIndex(slots[0]);
+  const b = getRuinSlotCenterByIndex(slots[1]);
+  const cx = (a.x + b.x) / 2;
+  const cy = (a.y + b.y) / 2;
+
+  const flyers = slots.map((idx, i) => {
+    const pt = getRuinSlotCenterByIndex(idx);
+    const f = document.createElement('div');
+    f.className = 'reshuffle-flyer';
+    f.style.left = `${pt.x}px`;
+    f.style.top = `${pt.y}px`;
+    f.style.transform = `translate(-50%,-50%) rotate(${i ? 12 : -12}deg) scale(1)`;
+    document.body.appendChild(f);
+    return f;
+  });
+
+  if (Number.isFinite(hintSlotIndex)) setHintRuinSlotHighlight(hintSlotIndex);
+
+  await sleep(30);
+  flyers.forEach((f, i) => {
+    f.style.transition = 'left 360ms ease, top 360ms ease, transform 360ms ease';
+    f.style.left = `${cx}px`;
+    f.style.top = `${cy}px`;
+    f.style.transform = `translate(-50%,-50%) rotate(${i ? 24 : -24}deg) scale(1.05)`;
+  });
+  await sleep(390);
+  flyers.forEach((f, i) => {
+    f.style.transition = 'left 460ms ease, top 460ms ease, transform 460ms ease';
+    f.style.left = `${(i ? a.x : b.x)}px`;
+    f.style.top = `${(i ? a.y : b.y)}px`;
+    f.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(1)';
+  });
+  await sleep(500);
+  flyers.forEach(f => f.remove());
 }
 
 async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
@@ -6438,6 +6596,10 @@ async function playCardFromHand(cardIndex){
     await resolveKt4(myId);
     return;
   }
+  if (usedKey === 'kt6'){
+    await resolveKt6(myId);
+    return;
+  }
   if (usedKey === '6'){
     await resolveEffect6(myId);
     return;
@@ -6597,6 +6759,7 @@ async function clearEffectsForOneReveal(){
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectKt6`), null),
   ]);
 }
 
@@ -6607,6 +6770,7 @@ async function clearEffectsForXReveal(){
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectKt6`), null),
   ]);
 }
 
@@ -7533,6 +7697,175 @@ async function finishKt7AndAdvance(){
   await advanceTurnToNextPlayer();
 }
 
+async function resolveKt6(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  const topSlotIndex = firstEmptyRuinSlotIndex(getRuinsSlots());
+  if (topSlotIndex === null){
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await update(turnRef, { paused:true });
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const topCard = await drawOneFromDeckAtomic();
+  if (!topCard){
+    await update(turnRef, { paused:false });
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'movingTop',
+    at: Date.now(),
+    topCard: String(topCard),
+    topSlotIndex,
+    targetSlotIndex: null,
+    selectedPlayedPlayerId: null,
+    selectedPlayedIndex: null,
+    selectedCardValue: null,
+  });
+
+  await emitRuinMoveEvent(playerId, topCard, topSlotIndex, 'kt6Top');
+  await sleep(RUIN_MOVE_ANIM_MS);
+
+  await runTransaction(ref(db, `rooms/${state.roomCode}/ruins`), (ruins) => {
+    const src = Array.isArray(ruins) ? [...ruins] : [];
+    const slots = new Array(6).fill(null);
+    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    if (!slots[topSlotIndex]) slots[topSlotIndex] = { v: String(topCard), by: playerId, at: Date.now() };
+    return slots;
+  }, { applyLocally:false });
+
+  const targetSlotIndex = firstEmptyRuinSlotIndex(getRuinsSlots());
+  if (targetSlotIndex === null){
+    await set(ref(db, `rooms/${state.roomCode}/effectKt6`), null);
+    await update(turnRef, { paused:false });
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'selectPlayed',
+    at: Date.now(),
+    topCard: String(topCard),
+    topSlotIndex,
+    targetSlotIndex,
+    selectedPlayedPlayerId: null,
+    selectedPlayedIndex: null,
+    selectedCardValue: null,
+  });
+}
+
+async function handleKt6Pick(fromPlayerId, fromPlayedIndex){
+  if (!state.roomCode) return;
+  const ef = state.effectKt6;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'selectPlayed') return;
+
+  const targetSlotIndex = Number(ef.targetSlotIndex);
+  if (!Number.isFinite(targetSlotIndex)) return;
+
+  const removedValue = await removePlayedCardByIndex(fromPlayerId, fromPlayedIndex);
+  if (removedValue === null || removedValue === undefined) return;
+
+  await emitRuinMoveEvent(fromPlayerId, removedValue, targetSlotIndex, 'kt6Played', { fromPlayedIndex });
+  await sleep(RUIN_MOVE_ANIM_MS);
+
+  await runTransaction(ref(db, `rooms/${state.roomCode}/ruins`), (ruins) => {
+    const src = Array.isArray(ruins) ? [...ruins] : [];
+    const slots = new Array(6).fill(null);
+    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    if (!slots[targetSlotIndex]) slots[targetSlotIndex] = { v: String(removedValue), by: state.userId, at: Date.now() };
+    return slots;
+  }, { applyLocally:false });
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    ...ef,
+    phase: 'confirmShuffle',
+    at: Date.now(),
+    selectedPlayedPlayerId: fromPlayerId,
+    selectedPlayedIndex: Number(fromPlayedIndex),
+    selectedCardValue: String(removedValue),
+  });
+}
+
+async function cancelKt6ShuffleSelection(){
+  if (!state.roomCode) return;
+  const ef = state.effectKt6;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'confirmShuffle') return;
+
+  const targetSlotIndex = Number(ef.targetSlotIndex);
+  const selectedPid = String(ef.selectedPlayedPlayerId || '');
+  const selectedCardValue = String(ef.selectedCardValue || '');
+  if (Number.isFinite(targetSlotIndex)){
+    await runTransaction(ref(db, `rooms/${state.roomCode}/ruins`), (ruins) => {
+      const src = Array.isArray(ruins) ? [...ruins] : [];
+      const slots = new Array(6).fill(null);
+      for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+      slots[targetSlotIndex] = null;
+      return slots;
+    }, { applyLocally:false });
+  }
+  if (selectedPid && selectedCardValue){
+    await addCardToPlayed(selectedPid, selectedCardValue);
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    ...ef,
+    phase: 'selectPlayed',
+    at: Date.now(),
+    selectedPlayedPlayerId: null,
+    selectedPlayedIndex: null,
+    selectedCardValue: null,
+  });
+}
+
+async function finishKt6Shuffle(){
+  if (!state.roomCode) return;
+  const ef = state.effectKt6;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'confirmShuffle') return;
+
+  const topSlotIndex = Number(ef.topSlotIndex);
+  const targetSlotIndex = Number(ef.targetSlotIndex);
+  if (!Number.isFinite(topSlotIndex) || !Number.isFinite(targetSlotIndex)) return;
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    ...ef,
+    phase: 'shuffling',
+    at: Date.now(),
+  });
+
+  await emitKt6ShuffleEvent([topSlotIndex, targetSlotIndex], state.userId, targetSlotIndex);
+  await sleep(KT7_RETURN_ANIM_MS);
+
+  await runTransaction(ref(db, `rooms/${state.roomCode}/ruins`), (ruins) => {
+    const src = Array.isArray(ruins) ? [...ruins] : [];
+    const slots = new Array(6).fill(null);
+    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const a = slots[topSlotIndex];
+    const b = slots[targetSlotIndex];
+    if (!a || !b) return slots;
+    if (Math.random() < 0.5){
+      slots[topSlotIndex] = b;
+      slots[targetSlotIndex] = a;
+    }
+    return slots;
+  }, { applyLocally:false });
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), null);
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
+}
+
 async function resolveKt5(playerId){
   if (!state.roomCode) return;
   const seq = state.turn.turnSeq;
@@ -8217,6 +8550,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeEffect3();
   subscribeEffect4();
   subscribeEffectKt2();
+  subscribeEffectKt6();
   subscribeEffect6();
   subscribeEffect7();
   subscribeEffect8();
@@ -8227,6 +8561,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeReshuffleEvent();
   subscribeKt4ShuffleEvent();
   subscribeKt2ShuffleEvent();
+  subscribeKt6ShuffleEvent();
   subscribeRuinMoveEvent();
   subscribeRuinTakeEvent();
   subscribeHandTransferEvent();
@@ -8374,8 +8709,10 @@ function renderRuinsArea(){
   const kt5Phase = String(efKt5?.phase || '');
   const mineKt7Selecting = !!(kt7Mine && kt7Phase === 'selectPair');
   const mineKt7Inspecting = !!(kt7Mine && kt7Phase === 'inspectPick');
+  const efKt6 = state.effectKt6;
+  const mineKt6Selecting = !!(efKt6 && efKt6.playerId === state.userId && efKt6.phase === 'selectPlayed');
 
-  if (mine6Selecting || mine7Picking || mine7Placing || mineKt3Picking || mineKt3Placing || mineKt7Selecting || mineKt7Inspecting) wrap.classList.add('drop-enabled');
+  if (mine6Selecting || mine7Picking || mine7Placing || mineKt3Picking || mineKt3Placing || mineKt7Selecting || mineKt7Inspecting || mineKt6Selecting) wrap.classList.add('drop-enabled');
 
   const slots = getRuinsSlots();
   const kt7HintSlots = Array.isArray(efKt7?.hintSlots) ? efKt7.hintSlots.map(Number).filter(n => Number.isFinite(n)) : [];
@@ -8387,7 +8724,7 @@ function renderRuinsArea(){
     const slot = document.createElement('div');
     slot.className = 'ruins-slot';
     slot.dataset.i = String(i);
-    if ((mine7Placing && Number(ui.effect7TargetSlot) === i) || (mineKt3Placing && Number(ui.effectKt3TargetSlot) === i) || kt7HintSlots.includes(i)) slot.classList.add('hint-target');
+    if ((mine7Placing && Number(ui.effect7TargetSlot) === i) || (mineKt3Placing && Number(ui.effectKt3TargetSlot) === i) || kt7HintSlots.includes(i) || (mineKt6Selecting && Number(efKt6?.targetSlotIndex) === i)) slot.classList.add('hint-target');
     wrap.appendChild(slot);
   }
 
@@ -8885,6 +9222,17 @@ function renderPlayerCircle(players){
           c.addEventListener('pointercancel', onKt2PlayedPointerCancel);
         }
 
+        const kt6Ef = state.effectKt6;
+        const kt6MineSelecting = !!(ui.effectKt6SelectingDiscard && kt6Ef && kt6Ef.playerId === state.userId && kt6Ef.phase === 'selectPlayed');
+        if (kt6MineSelecting && p.id !== state.userId){
+          c.classList.add('kt6-pickable');
+          c.draggable = false;
+          c.addEventListener('pointerdown', (ev) => startZoomTap(ev, c));
+          c.addEventListener('click', async () => {
+            await handleKt6Pick(p.id, absIndex);
+          });
+        }
+
         row.appendChild(c);
       });
 
@@ -8957,6 +9305,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effect7`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectKt6`), null),
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
@@ -8977,6 +9326,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/oneRevealEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/kt4ShuffleEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`), null),
+    set(ref(db, `rooms/${state.roomCode}/kt6ShuffleEvent`), null),
   ]);
 
   if (initialDrawDisp){
@@ -9013,6 +9363,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effect7`)),
     remove(ref(db, `${base}/effect8`)),
     remove(ref(db, `${base}/effectKt2`)),
+    remove(ref(db, `${base}/effectKt6`)),
 
     remove(ref(db, `${base}/eliminated`)),
     remove(ref(db, `${base}/kt1Revived`)),
@@ -9030,6 +9381,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/oneRevealEvent`)),
     remove(ref(db, `${base}/kt4ShuffleEvent`)),
     remove(ref(db, `${base}/kt2ShuffleEvent`)),
+    remove(ref(db, `${base}/kt6ShuffleEvent`)),
     remove(ref(db, `${base}/explorationFaceEvent`)),
     remove(ref(db, `${base}/explorationPickEvent`)),
     remove(ref(db, `${base}/handTransferEvent`)),
