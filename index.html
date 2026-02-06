@@ -407,6 +407,19 @@
     outline:2px solid rgba(234,179,8,.95);
     outline-offset:1px;
   }
+  .played-card.kt2-pickable{
+    cursor:grab;
+    touch-action:none;
+    animation: fanPickPulse 760ms ease-in-out infinite;
+  }
+  .played-card.kt2-pickable:hover{
+    outline:2px solid rgba(37,99,235,.55);
+    outline-offset:1px;
+  }
+  .played-card.drag-source-hidden{
+    opacity:0 !important;
+    pointer-events:none !important;
+  }
 
   .card-face{
     position:absolute;
@@ -1903,6 +1916,7 @@ const state = {
   effect7: null,
   effect8: null,
   effectKt3: null,
+  effectKt2: null,
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
@@ -1939,6 +1953,9 @@ const ui = {
   effect8Selecting: false,
   effect8Returning: false,
   effect8TargetPlayerId: null,
+
+  effectKt2Selecting: false,
+
   kt8Guessing: false,
   kt8GuessOptions: [],
 
@@ -2849,6 +2866,7 @@ let lastXRevealEventId = null;
 let lastOneRevealEventId = null;
 let lastExplorationEventId = null;
 let lastKt4ShuffleEventId = null;
+let lastKt2ShuffleEventId = null;
 
 function generateRoomCode(length = 6){
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -2928,6 +2946,7 @@ function calcIsPlayable(){
   if (ui.effect7Picking || ui.effect7Placing) return false;
   if (ui.effectKt3Selecting || ui.effectKt3Returning) return false;
   if (ui.effect8Selecting || ui.effect8Returning) return false;
+  if (ui.effectKt2Selecting) return false;
 
   // 脱落者は操作不可
   if (state.eliminated?.[myId]) return false;
@@ -2944,6 +2963,7 @@ function updateTurnUI(){
   myHandEl.classList.toggle('effect6-pick', ui.effect6Selecting);
   myHandEl.classList.toggle('effect7-place', ui.effect7Placing || ui.effectKt3Returning);
   myHandEl.classList.toggle('effect8-return', ui.effect8Returning);
+  playerCircle.classList.toggle('kt2-selecting', ui.effectKt2Selecting);
   const kt3Picking = !!(state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'pickRuins');
   myHandRow.classList.toggle('effect7-pick-target', kt3Picking || e7pickDrag.active);
   if (!e7pickDrag.active) myHandRow.classList.remove('effect7-pick-active');
@@ -3147,6 +3167,33 @@ function subscribeEffect4(){
         // ④中じゃない / 自分じゃない → 非表示
         hidePeekCard();
         hideConfirmPop();
+      }
+    }
+
+    updateTurnUI();
+    renderHands();
+  });
+}
+
+
+function subscribeEffectKt2(){
+  const eRef = ref(db, `rooms/${state.roomCode}/effectKt2`);
+  onValue(eRef, snap => {
+    state.effectKt2 = snap.val() || null;
+
+    const mine = state.effectKt2 && state.effectKt2.playerId === state.userId;
+    const selecting = !!(mine && state.effectKt2.phase === 'select');
+
+    if (selecting !== ui.effectKt2Selecting){
+      ui.effectKt2Selecting = selecting;
+      if (!selecting && kt2drag.active) cleanupKt2Drag();
+    }
+
+    if (deckPile){
+      deckPile.title = selecting ? '山札へドラッグして戻す（KT2）' : '山札';
+      if (!selecting){
+        setDeckDropHint(false);
+        setDeckDropActive(false);
       }
     }
 
@@ -3386,6 +3433,38 @@ function subscribeKt4ShuffleEvent(){
 }
 
 /* 遺跡移動アニメ（他プレイヤーの手札→遺跡） */
+
+function subscribeKt2ShuffleEvent(){
+  const evRef = ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`);
+  onValue(evRef, snap => {
+    const ev = snap.val();
+    if (!ev || !ev.id) return;
+    if (ev.id === lastKt2ShuffleEventId) return;
+    lastKt2ShuffleEventId = ev.id;
+
+    const now = Date.now();
+    if (ev.at && (now - ev.at) > 15000) return;
+
+    const fromPlayerId = String(ev.fromPlayerId || '');
+    const fromPlayedIndex = Number(ev.fromPlayedIndex);
+    const byPlayerId = String(ev.byPlayerId || '');
+    const transferMs = Math.max(0, Number(ev.transferMs || 0));
+
+    if (fromPlayerId && byPlayerId && byPlayerId !== state.userId){
+      animateReturnTopFromPlayedCardToDeck(fromPlayerId, fromPlayedIndex);
+    }
+
+    const count = Number(ev.count || 1);
+    if (transferMs > 0){
+      setTimeout(() => {
+        animateKt2ShuffleToDeck(count);
+      }, transferMs);
+    } else {
+      animateKt2ShuffleToDeck(count);
+    }
+  });
+}
+
 function subscribeRuinMoveEvent(){
   const evRef = ref(db, `rooms/${state.roomCode}/ruinMoveEvent`);
   onValue(evRef, snap => {
@@ -3609,6 +3688,9 @@ let e7pickDrag = { active:false, slotIndex:null, pointerId:null, ghostEl:null, o
 /* ★⑧ドラッグ状態（相手へ返す） */
 let e8drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overTarget:false, targetPlayerId:null, sourceEl:null };
 
+let kt2drag = { active:false, pointerId:null, ghostEl:null, sourceEl:null, overDeck:false, fromPlayerId:null, fromPlayedIndex:null };
+
+
 function cleanupDrag(){
   if (drag.ghostEl) drag.ghostEl.remove();
   if (drag.sourceEl) drag.sourceEl.classList.remove('drag-source-hidden');
@@ -3696,6 +3778,87 @@ function cleanupE8Drag({ keepSourceHidden = false } = {}){
   e8drag.targetPlayerId = null;
   setEffect8TargetActive(false);
   setEffect8TargetHighlight(false);
+}
+
+
+function cleanupKt2Drag({ keepSourceHidden = false } = {}){
+  if (kt2drag.ghostEl) kt2drag.ghostEl.remove();
+  if (kt2drag.sourceEl && !keepSourceHidden) kt2drag.sourceEl.classList.remove('drag-source-hidden');
+  kt2drag.active = false;
+  kt2drag.pointerId = null;
+  kt2drag.ghostEl = null;
+  kt2drag.sourceEl = null;
+  kt2drag.overDeck = false;
+  kt2drag.fromPlayerId = null;
+  kt2drag.fromPlayedIndex = null;
+  setDeckDropActive(false);
+  setDeckDropHint(false);
+}
+
+function onKt2PlayedPointerDown(e, cardEl){
+  if (!ui.effectKt2Selecting) return;
+  const fromPid = cardEl?.dataset?.pid || '';
+  const fromIdx = Number(cardEl?.dataset?.playedIndex || cardEl?.dataset?.index || 0);
+  if (!fromPid || fromPid === state.userId) return;
+
+  startZoomTap(e, cardEl);
+
+  kt2drag.active = true;
+  kt2drag.pointerId = e.pointerId;
+  kt2drag.overDeck = false;
+  kt2drag.fromPlayerId = fromPid;
+  kt2drag.fromPlayedIndex = Number.isFinite(fromIdx) ? fromIdx : 0;
+
+  kt2drag.sourceEl = cardEl;
+  cardEl.classList.add('drag-source-hidden');
+
+  const ghost = document.createElement('div');
+  ghost.className = 'drag-ghost';
+  setCardFace(ghost, cardEl.dataset.value || cardEl.textContent || '');
+  document.body.appendChild(ghost);
+  kt2drag.ghostEl = ghost;
+
+  ghost.style.left = `${e.clientX}px`;
+  ghost.style.top  = `${e.clientY}px`;
+
+  setDeckDropHint(true);
+  setDeckDropActive(false);
+
+  cardEl.setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
+function onKt2PlayedPointerMove(e){
+  if (!kt2drag.active || kt2drag.pointerId !== e.pointerId || !kt2drag.ghostEl) return;
+  e.preventDefault();
+  kt2drag.ghostEl.style.left = `${e.clientX}px`;
+  kt2drag.ghostEl.style.top  = `${e.clientY}px`;
+
+  const rect = deckPile.getBoundingClientRect();
+  const over = isPointInRect(e.clientX, e.clientY, rect);
+  kt2drag.overDeck = over;
+  setDeckDropActive(over);
+}
+
+async function onKt2PlayedPointerUp(e){
+  if (!kt2drag.active || kt2drag.pointerId !== e.pointerId) return;
+  const shouldDrop = kt2drag.overDeck;
+  const fromPid = kt2drag.fromPlayerId;
+  const fromIdx = kt2drag.fromPlayedIndex;
+  const cardEl = e.currentTarget;
+  cleanupKt2Drag({ keepSourceHidden: shouldDrop });
+  try { cardEl.releasePointerCapture(e.pointerId); } catch {}
+
+  if (shouldDrop){
+    await handleKt2Drop(fromPid, fromIdx, cardEl);
+  }
+}
+
+function onKt2PlayedPointerCancel(e){
+  if (!kt2drag.active || kt2drag.pointerId !== e.pointerId) return;
+  const cardEl = e.currentTarget;
+  cleanupKt2Drag();
+  try { cardEl.releasePointerCapture(e.pointerId); } catch {}
 }
 
 function isPointInRect(x, y, rect){ return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom; }
@@ -3811,7 +3974,7 @@ function onZoomTapEnd(e){
   const moved = zoomTapState.moved;
   clearZoomTapState();
   if (moved) return;
-  if (drag.active || e2drag.active || e6drag.active || e7drag.active || e7pickDrag.active || e8drag.active) return;
+  if (drag.active || e2drag.active || e6drag.active || e7drag.active || e7pickDrag.active || e8drag.active || kt2drag.active) return;
   openZoomFromCard(target);
 }
 
@@ -4504,6 +4667,21 @@ async function emitKt4ShuffleEvent(counts, byPlayerId){
   });
 }
 
+
+async function emitKt2ShuffleEvent(count = 1, byPlayerId = null){
+  if (!state.roomCode) return;
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`), {
+    id,
+    count: Math.max(1, Number(count || 1)),
+    byPlayerId: byPlayerId || null,
+    fromPlayerId: null,
+    fromPlayedIndex: null,
+    transferMs: 0,
+    at: Date.now(),
+  });
+}
+
 async function emitRuinMoveEvent(fromPlayerId, cardValue, slotIndex, mode){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -4779,6 +4957,96 @@ async function animateKt4ShuffleHands(counts = {}){
   }
 }
 
+
+async function animateKt2ShuffleToDeck(count = 1){
+  if (!deckPile) return;
+
+  const dr = deckPile.getBoundingClientRect();
+  const deckX = dr.left + dr.width / 2;
+  const deckY = dr.top + dr.height / 2;
+
+  const n = Math.min(Math.max(3, Number(count || 1)), 6);
+  const flyers = [];
+
+  for (let i = 0; i < n; i++){
+    const f = document.createElement('div');
+    f.className = 'reshuffle-flyer';
+    f.style.left = `${deckX + (((i * 11) % 16) - 8)}px`;
+    f.style.top = `${deckY + (((i * 7) % 12) - 6)}px`;
+    f.style.transform = `translate(-50%,-50%) rotate(${((i * 13) % 18) - 9}deg) scale(0.9)`;
+    f.style.zIndex = String(4200 + i);
+    document.body.appendChild(f);
+    flyers.push(f);
+  }
+
+  await sleep(30);
+
+  const stackPoints = flyers.map((_, i) => ({
+    x: deckX + (((i * 3) % 8) - 4),
+    y: deckY + (((i * 2) % 8) - 4),
+    rot: 4,
+  }));
+
+  flyers.forEach((f, i) => {
+    const p = stackPoints[i];
+    f.style.transition = 'left 180ms ease-in-out, top 180ms ease-in-out, transform 180ms ease-in-out';
+    f.style.left = `${p.x}px`;
+    f.style.top = `${p.y}px`;
+    f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.86)`;
+  });
+  await sleep(200);
+
+  const OUT_X = 42;
+  const TILT_MORE = 5;
+  const DUR = 200;
+  const PAUSE = 16;
+  const loops = Math.min(2, Math.max(2, flyers.length - 1));
+
+  for (let k = 0; k < loops; k++){
+    const frontIdx = flyers.length - 1;
+    const backIdx = flyers.length - 2;
+    const frontCard = flyers[frontIdx];
+    const frontPoint = stackPoints[frontIdx];
+    const backPoint = stackPoints[backIdx];
+    if (!frontCard || !frontPoint || !backPoint) break;
+
+    frontCard.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+    frontCard.style.left = `${frontPoint.x + OUT_X}px`;
+    frontCard.style.top = `${frontPoint.y}px`;
+    frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.86)`;
+    await sleep(DUR);
+
+    const moved = stackPoints.pop();
+    stackPoints.splice(backIdx, 0, moved);
+    const movedFlyer = flyers.pop();
+    flyers.splice(backIdx, 0, movedFlyer);
+
+    flyers.forEach((f, i) => {
+      f.style.zIndex = String(4200 + i);
+    });
+
+    movedFlyer.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+    movedFlyer.style.left = `${stackPoints[backIdx].x}px`;
+    movedFlyer.style.top = `${stackPoints[backIdx].y}px`;
+    movedFlyer.style.transform = `translate(-50%,-50%) rotate(${stackPoints[backIdx].rot}deg) scale(0.86)`;
+    await sleep(DUR);
+    await sleep(PAUSE);
+  }
+
+  flyers.forEach(f => {
+    f.style.transition = 'opacity 140ms ease';
+    f.style.opacity = '0';
+  });
+  await sleep(160);
+
+  deckPile.classList.add('shuffling');
+  await sleep(520);
+
+  flyers.forEach(f => f.remove());
+  deckPile.classList.remove('shuffling');
+}
+
+
 function getPlayedRowAnchorEl(playerId){
   if (!playerId && playerId !== 0) return null;
   return playerCircle.querySelector(`.played-row[data-pid="${playerId}"]`);
@@ -4888,6 +5156,55 @@ async function animateReturnTopFromPlayerAnchorToDeck(playerId){
   await sleep(160);
 
   flyer.remove();
+}
+
+
+async function animateReturnTopFromPlayedCardToDeck(playerId, playedIndex){
+  if (!deckPile) return;
+
+  const to = deckPile.getBoundingClientRect();
+  const endX = to.left + to.width/2;
+  const endY = to.top  + to.height/2;
+
+  const cardEl = Number.isFinite(Number(playedIndex))
+    ? playerCircle.querySelector(`.played-card[data-pid="${playerId}"][data-played-index="${Number(playedIndex)}"]`)
+    : null;
+
+  if (cardEl){
+    const cr = cardEl.getBoundingClientRect();
+    const startX = cr.left + cr.width / 2;
+    const startY = cr.top + cr.height / 2;
+    const cardValue = String(cardEl.dataset.value || '');
+
+    const flyer = createFaceFlyer(cardValue);
+    flyer.style.left = `${startX}px`;
+    flyer.style.top  = `${startY}px`;
+    flyer.style.transform = 'translate(-50%,-50%) rotate(-8deg) scale(1.0)';
+    document.body.appendChild(flyer);
+
+    cardEl.classList.add('drag-source-hidden');
+
+    await sleep(0);
+    flyer.style.transition = 'transform 120ms ease, top 120ms ease';
+    flyer.style.top = `${startY - 14}px`;
+    flyer.style.transform = 'translate(-50%,-50%) rotate(-14deg) scale(1.06)';
+    await sleep(140);
+
+    flyer.style.transition = 'left 360ms ease, top 360ms ease, transform 360ms ease';
+    flyer.style.left = `${endX}px`;
+    flyer.style.top  = `${endY}px`;
+    flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(0.82)';
+    await sleep(380);
+
+    flyer.style.transition = 'opacity 120ms ease, transform 120ms ease';
+    flyer.style.opacity = '0';
+    flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.76)';
+    await sleep(140);
+    flyer.remove();
+    return;
+  }
+
+  await animateReturnTopFromPlayerAnchorToDeck(playerId);
 }
 
 /* ★②：自分視点：選んだカード(表/数字)→山札 */
@@ -5604,6 +5921,10 @@ async function playCardFromHand(cardIndex){
     await resolveEffect4(myId);
     return;
   }
+  if (usedKey === 'kt2'){
+    await resolveKt2(myId);
+    return;
+  }
   if (usedKey === 'kt4'){
     await resolveKt4(myId);
     return;
@@ -5703,6 +6024,7 @@ async function clearEffectsForOneReveal(){
     set(ref(db, `rooms/${state.roomCode}/effect3`), null),
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
   ]);
 }
 
@@ -5712,6 +6034,7 @@ async function clearEffectsForXReveal(){
     set(ref(db, `rooms/${state.roomCode}/effect3`), null),
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
   ]);
 }
 
@@ -6146,6 +6469,81 @@ async function resolveEffect4(playerId){
     revealed: null,
     mode: 'normal',
   });
+}
+
+
+async function resolveKt2(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  await update(turnRef, { paused:true });
+
+  const deckArr = Array.isArray(state.deck) ? state.deck : [];
+  if (!deckArr.length){
+    await handleDeckExhausted(playerId, seq, 'effectKt2');
+    return;
+  }
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effectKt2`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'select',
+    at: Date.now(),
+  });
+}
+
+async function removePlayedCardByIndex(playerId, playedIndex){
+  if (!state.roomCode) return null;
+  const pRef = ref(db, `rooms/${state.roomCode}/played/${playerId}`);
+  let removedValue = null;
+  const res = await runTransaction(pRef, (arr) => {
+    const src = Array.isArray(arr) ? [...arr] : [];
+    const idx = Math.max(0, Math.min(src.length - 1, Number(playedIndex || 0)));
+    if (!src.length || idx < 0 || idx >= src.length) return src;
+    removedValue = src.splice(idx, 1)[0];
+    return src;
+  }, { applyLocally:false });
+
+  if (!res.committed) return null;
+  return removedValue;
+}
+
+async function handleKt2Drop(fromPlayerId, fromPlayedIndex, sourceEl = null){
+  if (!state.roomCode) return;
+  const ef = state.effectKt2;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'select') return;
+  if (!fromPlayerId || fromPlayerId === state.userId) return;
+
+  const transferMs = 680;
+  const evId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`), {
+    id: evId,
+    count: 1,
+    byPlayerId: state.userId,
+    fromPlayerId: fromPlayerId || null,
+    fromPlayedIndex: Number.isFinite(Number(fromPlayedIndex)) ? Number(fromPlayedIndex) : null,
+    transferMs,
+    at: Date.now(),
+  });
+
+  await sleep(transferMs);
+
+  const picked = await removePlayedCardByIndex(fromPlayerId, fromPlayedIndex);
+  if (picked == null){
+    if (sourceEl) sourceEl.classList.remove('drag-source-hidden');
+    return;
+  }
+
+  await unshiftCardToDeckAtomic(picked);
+  await sleep(680);
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt2`), null);
+  ui.effectKt2Selecting = false;
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
 }
 
 async function resolveKt4(playerId){
@@ -6969,6 +7367,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeEffect2();
   subscribeEffect3();
   subscribeEffect4();
+  subscribeEffectKt2();
   subscribeEffect6();
   subscribeEffect7();
   subscribeEffect8();
@@ -6978,6 +7377,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeReturnTopEvent();
   subscribeReshuffleEvent();
   subscribeKt4ShuffleEvent();
+  subscribeKt2ShuffleEvent();
   subscribeRuinMoveEvent();
   subscribeRuinTakeEvent();
   subscribeHandTransferEvent();
@@ -7362,6 +7762,7 @@ function renderPlayerCircle(players){
   const e3MineSelecting = !!(state.effect3 && state.effect3.playerId === state.userId && state.effect3.phase === 'select');
   const e4MineSelecting = !!(state.effect4 && state.effect4.playerId === state.userId && state.effect4.phase === 'select');
   const e8MineSelecting = !!(state.effect8 && state.effect8.playerId === state.userId && state.effect8.phase === 'select');
+  const kt2MineSelecting = !!(state.effectKt2 && state.effectKt2.playerId === state.userId && state.effectKt2.phase === 'select');
   const pickMode = (e3MineSelecting || e4MineSelecting || e8MineSelecting) && !state.gameOver;
 
   players.forEach((p, idx) => {
@@ -7555,6 +7956,9 @@ function renderPlayerCircle(players){
         setCardFace(c, v);
 
         const absIndex = sliceStart + localIndex;
+        c.dataset.playedIndex = String(absIndex);
+        c.dataset.pid = p.id;
+        c.dataset.value = String(v ?? '');
         const isUsedKt1 = (absIndex === usedKt1Index) && (String(v) === 'kt1');
 
         if (!parallel){
@@ -7568,6 +7972,15 @@ function renderPlayerCircle(players){
         }
 
         c.addEventListener('pointerdown', (ev) => startZoomTap(ev, c));
+
+        if (kt2MineSelecting && p.id !== state.userId){
+          c.classList.add('kt2-pickable');
+          c.draggable = false;
+          c.addEventListener('pointerdown', (ev) => onKt2PlayedPointerDown(ev, c));
+          c.addEventListener('pointermove', onKt2PlayedPointerMove);
+          c.addEventListener('pointerup', onKt2PlayedPointerUp);
+          c.addEventListener('pointercancel', onKt2PlayedPointerCancel);
+        }
 
         row.appendChild(c);
       });
@@ -7640,6 +8053,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effect6`), null),
     set(ref(db, `rooms/${state.roomCode}/effect7`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
@@ -7659,6 +8073,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/oneRevealEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/kt4ShuffleEvent`), null),
+    set(ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`), null),
   ]);
 
   if (initialDrawDisp){
@@ -7694,6 +8109,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effect6`)),
     remove(ref(db, `${base}/effect7`)),
     remove(ref(db, `${base}/effect8`)),
+    remove(ref(db, `${base}/effectKt2`)),
 
     remove(ref(db, `${base}/eliminated`)),
     remove(ref(db, `${base}/kt1Revived`)),
@@ -7710,6 +8126,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/xRevealEvent`)),
     remove(ref(db, `${base}/oneRevealEvent`)),
     remove(ref(db, `${base}/kt4ShuffleEvent`)),
+    remove(ref(db, `${base}/kt2ShuffleEvent`)),
     remove(ref(db, `${base}/explorationFaceEvent`)),
     remove(ref(db, `${base}/explorationPickEvent`)),
     remove(ref(db, `${base}/handTransferEvent`)),
