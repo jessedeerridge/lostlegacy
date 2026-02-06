@@ -5685,24 +5685,14 @@ async function animateKt7PairCollectToCenter(slotIndexes = []){
   kt7PairAnimSession = { flyers, slotIndexes: idxs, cx, cy };
 
   await sleep(20);
-  flyers.forEach((flyer, i) => {
-    const tilt = i === 0 ? 2 : -2;
-    flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
-    flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(0.96)`;
-    flyer.style.left = `${cx + (i === 0 ? -10 : 10)}px`;
-    flyer.style.top = `${cy - 8}px`;
+  flyers.forEach((flyer) => {
+    flyer.style.transition = 'transform 260ms ease, left 260ms ease, top 260ms ease';
+    flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.98)';
+    flyer.style.left = `${cx}px`;
+    flyer.style.top = `${cy}px`;
   });
 
-  await sleep(220);
-  flyers.forEach((flyer, i) => {
-    const tilt = i === 0 ? -2 : 2;
-    flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
-    flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(1.02)`;
-    flyer.style.left = `${cx + (i === 0 ? -5 : 5)}px`;
-    flyer.style.top = `${cy + 4}px`;
-  });
-
-  await sleep(220);
+  await sleep(280);
 }
 
 async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false){
@@ -5746,17 +5736,18 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
   const OUT_X = 42;
   const TILT_MORE = 0;
   const DUR = 200;
-  const loops = 2;
+  const SHUFFLE_SLIDE_COUNT = 2;
 
-  for (let k = 0; k < loops; k++){
+  for (let k = 0; k < SHUFFLE_SLIDE_COUNT; k++){
     const frontIdx = flyers.length - 1;
     const backIdx = flyers.length - 2;
     const frontCard = flyers[frontIdx];
     const frontPoint = stackPoints[frontIdx];
     if (!frontCard || !frontPoint || backIdx < 0) break;
 
+    const slideDir = (k % 2 === 0) ? 1 : -1;
     frontCard.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
-    frontCard.style.left = `${frontPoint.x + OUT_X}px`;
+    frontCard.style.left = `${frontPoint.x + (OUT_X * slideDir)}px`;
     frontCard.style.top = `${frontPoint.y}px`;
     frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.92)`;
     await sleep(DUR);
