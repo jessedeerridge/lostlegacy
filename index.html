@@ -7028,13 +7028,14 @@ function renderRuinsArea(){
     const card = document.createElement('div');
     card.className = 'ruins-card';
     card.dataset.i = String(i);
-    card.dataset.value = String(item?.v ?? item ?? '');
+    const itemValue = String(item?.v ?? item ?? '');
+    card.dataset.value = itemValue;
     card.textContent = '';
 
     const revealedValue = explorationRevealState.ruins.get(i);
-    if (revealedValue != null && String(revealedValue) === String(item)){
+    if (revealedValue != null && String(revealedValue) === itemValue){
       card.classList.add('exploration-front');
-      setCardFace(card, item);
+      setCardFace(card, itemValue);
     }
 
     if (mineKt3Reveal){
@@ -7042,7 +7043,7 @@ function renderRuinsArea(){
       card.classList.add('kt3-revealable');
       if (revealedSlots.includes(i)){
         card.classList.add('kt3-revealed', 'exploration-front');
-        setCardFace(card, item);
+        setCardFace(card, itemValue);
       }
       card.addEventListener('click', () => handleKt3RevealPick(i));
     }
