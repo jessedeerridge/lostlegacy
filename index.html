@@ -1592,6 +1592,12 @@ function normalizeCardValue(value){
   return v;
 }
 
+function getKt8GuessComparableValue(value){
+  const key = normalizeCardValue(value);
+  if (key.startsWith('kt')) return key.slice(2);
+  return key;
+}
+
 function getCardMeta(value){
   const key = normalizeCardValue(value);
   return CARD_META[key] || { name: '', reading: '' };
@@ -6501,7 +6507,9 @@ async function handleKt8GuessSelect(guessedNumber){
   const idx = Math.max(0, Math.min(cards.length - 1, targetCardIndex));
   const revealed = String(cards[idx] ?? '');
   const guessed = String(guessedNumber ?? '');
-  const result = (normalizeCardValue(revealed) === guessed) ? 'match' : 'mismatch';
+  const revealedComparable = getKt8GuessComparableValue(revealed);
+  const guessedComparable = getKt8GuessComparableValue(guessed);
+  const result = (revealedComparable === guessedComparable) ? 'match' : 'mismatch';
 
   await set(ref(db, `rooms/${state.roomCode}/effect8`), {
     id: ef.id,
