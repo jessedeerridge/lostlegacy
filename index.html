@@ -407,6 +407,19 @@
     outline:2px solid rgba(234,179,8,.95);
     outline-offset:1px;
   }
+  @keyframes playedPickPulse{
+    0%{ transform:scale(1); }
+    45%{ transform:scale(1.18); }
+    100%{ transform:scale(1); }
+  }
+  .played-card.effect2-pickable{
+    cursor:grab;
+    animation:playedPickPulse 760ms ease-in-out infinite;
+    box-shadow:0 0 0 2px rgba(37,99,235,.5), 0 10px 20px rgba(0,0,0,.2);
+  }
+  .played-card.effect2-pickable:active{
+    cursor:grabbing;
+  }
 
   .card-face{
     position:absolute;
@@ -2849,6 +2862,7 @@ let lastXRevealEventId = null;
 let lastOneRevealEventId = null;
 let lastExplorationEventId = null;
 let lastKt4ShuffleEventId = null;
+let lastEffect2DeckShuffleEventId = null;
 
 function generateRoomCode(length = 6){
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -2949,6 +2963,12 @@ function updateTurnUI(){
   if (!e7pickDrag.active) myHandRow.classList.remove('effect7-pick-active');
 
   playerCircle.classList.toggle('turn-paused', !!state.turn.paused);
+
+  if (deckPile){
+    const e2MineSelecting = !!(ui.effect2Selecting && state.effect2 && state.effect2.playerId === state.userId && state.effect2.phase === 'select');
+    deckPile.title = e2MineSelecting ? '山札（捨て札をここへドラッグ）' : '山札';
+    setDeckDropHint(e2MineSelecting || e2drag.active);
+  }
 
   if (state.gameOver){
     gameOverPop.classList.toggle('found5', state.gameOver?.reason === 'found5');
@@ -3076,8 +3096,10 @@ function subscribeEffect2(){
       ui.effect2SelectedIndex = null;
       ui.effect2DropPending = false;
       if (!selecting && e2drag.active) cleanupE2Drag();
+      setDeckDropHint(selecting);
       updateTurnUI();
       renderMyHand();
+      renderHands();
     }
   });
 }
@@ -3385,6 +3407,21 @@ function subscribeKt4ShuffleEvent(){
   });
 }
 
+function subscribeEffect2DeckShuffleEvent(){
+  const evRef = ref(db, `rooms/${state.roomCode}/effect2DeckShuffleEvent`);
+  onValue(evRef, snap => {
+    const ev = snap.val();
+    if (!ev || !ev.id) return;
+    if (ev.id === lastEffect2DeckShuffleEventId) return;
+    lastEffect2DeckShuffleEventId = ev.id;
+
+    const now = Date.now();
+    if (ev.at && (now - ev.at) > 15000) return;
+
+    animateEffect2DeckShuffle();
+  });
+}
+
 /* 遺跡移動アニメ（他プレイヤーの手札→遺跡） */
 function subscribeRuinMoveEvent(){
   const evRef = ref(db, `rooms/${state.roomCode}/ruinMoveEvent`);
@@ -3595,7 +3632,7 @@ function renderMyIdentity(){
 let drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overCenter:false, sourceEl:null };
 
 /* ②ドラッグ状態（山札へ戻す） */
-let e2drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overDeck:false, sourceEl:null };
+let e2drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overDeck:false, sourceEl:null, sourceType:null, sourcePlayerId:null, sourcePlayedIndex:null };
 
 /* ⑥ドラッグ状態（遺跡へドロップ） */
 let e6drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overSlot:false, slotIndex:null, sourceEl:null };
@@ -3630,6 +3667,9 @@ function cleanupE2Drag({ keepSourceHidden = false } = {}){
   e2drag.ghostEl = null;
   e2drag.sourceEl = null;
   e2drag.overDeck = false;
+  e2drag.sourceType = null;
+  e2drag.sourcePlayerId = null;
+  e2drag.sourcePlayedIndex = null;
   setDeckDropActive(false);
   setDeckDropHint(false);
 }
@@ -3841,31 +3881,6 @@ function onCardPointerDown(e){
   if (ui.effect8Selecting) return;
 
   if (ui.effect2Selecting){
-    const idx = Number(cardEl.dataset.index);
-    if (!Number.isFinite(idx)) return;
-
-    e2drag.active = true;
-    e2drag.cardIndex = idx;
-    e2drag.pointerId = e.pointerId;
-    e2drag.overDeck = false;
-
-    e2drag.sourceEl = cardEl;
-    cardEl.classList.add('drag-source-hidden');
-
-    const ghost = document.createElement('div');
-    ghost.className = 'drag-ghost';
-    setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
-    document.body.appendChild(ghost);
-    e2drag.ghostEl = ghost;
-
-    ghost.style.left = `${e.clientX}px`;
-    ghost.style.top  = `${e.clientY}px`;
-
-    setDeckDropHint(true);
-    setDeckDropActive(false);
-
-    cardEl.setPointerCapture(e.pointerId);
-    e.preventDefault();
     return;
   }
 
@@ -4000,6 +4015,47 @@ function onCardPointerDown(e){
   e.preventDefault();
 }
 
+function onPlayedCardPointerDown(e){
+  const cardEl = e.currentTarget;
+  startZoomTap(e, cardEl);
+
+  if (state.gameOver) return;
+  const ef = state.effect2;
+  const mineSelecting = !!(ui.effect2Selecting && ef && ef.playerId === state.userId && ef.phase === 'select');
+  if (!mineSelecting) return;
+
+  const sourcePlayerId = String(cardEl.dataset.pid || '');
+  const playedIndex = Number(cardEl.dataset.playedIndex);
+  if (!sourcePlayerId || sourcePlayerId === state.userId) return;
+  if (!Number.isFinite(playedIndex)) return;
+
+  e2drag.active = true;
+  e2drag.cardIndex = playedIndex;
+  e2drag.pointerId = e.pointerId;
+  e2drag.overDeck = false;
+  e2drag.sourceEl = cardEl;
+  e2drag.sourceType = 'played';
+  e2drag.sourcePlayerId = sourcePlayerId;
+  e2drag.sourcePlayedIndex = playedIndex;
+
+  cardEl.classList.add('drag-source-hidden');
+
+  const ghost = document.createElement('div');
+  ghost.className = 'drag-ghost';
+  setCardFace(ghost, cardEl.dataset.value || cardEl.textContent);
+  document.body.appendChild(ghost);
+  e2drag.ghostEl = ghost;
+
+  ghost.style.left = `${e.clientX}px`;
+  ghost.style.top  = `${e.clientY}px`;
+
+  setDeckDropHint(true);
+  setDeckDropActive(false);
+
+  cardEl.setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
 function onCardPointerMove(e){
   if (e2drag.active && e2drag.pointerId === e.pointerId && e2drag.ghostEl){
     e2drag.ghostEl.style.left = `${e.clientX}px`;
@@ -4073,12 +4129,14 @@ async function onCardPointerUp(e){
   if (e2drag.active && e2drag.pointerId === e.pointerId){
     const idx = e2drag.cardIndex;
     const shouldDrop = e2drag.overDeck;
+    const sourceType = e2drag.sourceType;
+    const sourcePlayerId = e2drag.sourcePlayerId;
     cleanupE2Drag({ keepSourceHidden: shouldDrop });
     try { cardEl.releasePointerCapture(e.pointerId); } catch {}
-    if (shouldDrop){
+    if (shouldDrop && sourceType === 'played'){
       ui.effect2SelectedIndex = idx;
       ui.effect2DropPending = true;
-      await handleEffect2Pick(idx, cardEl);
+      await handleEffect2Pick(sourcePlayerId, idx, cardEl);
     }
     return;
   }
@@ -4504,6 +4562,15 @@ async function emitKt4ShuffleEvent(counts, byPlayerId){
   });
 }
 
+async function emitKt4DeckShuffleEvent(){
+  if (!state.roomCode) return;
+  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effect2DeckShuffleEvent`), {
+    id,
+    at: Date.now(),
+  });
+}
+
 async function emitRuinMoveEvent(fromPlayerId, cardValue, slotIndex, mode){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -4777,6 +4844,62 @@ async function animateKt4ShuffleHands(counts = {}){
   } finally {
     setKt4CollectionMask(false);
   }
+}
+
+
+async function animateEffect2DeckShuffle(){
+  if (!deckPile) return;
+  const dr = deckPile.getBoundingClientRect();
+  const cx = dr.left + dr.width / 2;
+  const cy = dr.top + dr.height / 2;
+
+  const flyers = [];
+  for (let i = 0; i < 5; i++){
+    const f = document.createElement('div');
+    f.className = 'reshuffle-flyer';
+    f.style.left = `${cx + (i * 2)}px`;
+    f.style.top = `${cy + (i * 2)}px`;
+    f.style.transform = `translate(-50%,-50%) rotate(${(i * 7) - 12}deg) scale(0.58)`;
+    f.style.zIndex = String(4100 + i);
+    document.body.appendChild(f);
+    flyers.push(f);
+  }
+
+  await sleep(30);
+
+  const OUT_X = 48;
+  const DUR = 200;
+  for (let k = 0; k < 3; k++){
+    const frontIdx = flyers.length - 1;
+    const backIdx = flyers.length - 2;
+    const frontCard = flyers[frontIdx];
+    const backCard = flyers[backIdx];
+    if (!frontCard || !backCard) break;
+
+    frontCard.style.transition = `left ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+    frontCard.style.left = `${cx + OUT_X}px`;
+    frontCard.style.transform = 'translate(-50%,-50%) rotate(14deg) scale(0.6)';
+    await sleep(DUR);
+
+    const moved = flyers.pop();
+    flyers.splice(backIdx, 0, moved);
+
+    flyers.forEach((f, i) => {
+      f.style.zIndex = String(4100 + i);
+      f.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+      f.style.left = `${cx + (i * 2)}px`;
+      f.style.top = `${cy + (i * 2)}px`;
+      f.style.transform = `translate(-50%,-50%) rotate(${(i * 7) - 12}deg) scale(0.58)`;
+    });
+    await sleep(DUR + 20);
+  }
+
+  flyers.forEach((f) => {
+    f.style.transition = 'opacity 120ms ease';
+    f.style.opacity = '0';
+  });
+  await sleep(130);
+  flyers.forEach((f) => f.remove());
 }
 
 function getPlayedRowAnchorEl(playerId){
@@ -5925,94 +6048,62 @@ async function resolveEffect2(playerId){
     id: effectId,
     playerId,
     seq: Number(seq || 0),
-    phase: 'draw',
-    at: Date.now()
-  });
-
-  const drawn = await drawOneFromDeckAtomic();
-  if (!drawn){
-    await handleDeckExhausted(playerId, seq, 'effect2');
-    return;
-  }
-
-  // 全員に裏で「山札→その人」移動アニメ
-  await emitDrawEvent(playerId, seq, 'effect2');
-  await sleep(DRAW_COMMIT_DELAY_MS);
-  await addCardToHandAtomic(playerId, drawn);
-
-  // 手札全て大小＆クリック選択へ
-  await set(ref(db, `rooms/${state.roomCode}/effect2`), {
-    id: effectId,
-    playerId,
-    seq: Number(seq || 0),
     phase: 'select',
     at: Date.now()
   });
 }
 
-/* ★②：手札から1枚選んで山札TOPへ戻す（修正版：選んだカード位置→山札へ飛ぶ） */
-async function handleEffect2Pick(cardIndex, cardEl){
+async function handleEffect2Pick(targetPlayerId, playedCardIndex, cardEl){
   if (!state.roomCode) return;
 
   const ef = state.effect2;
   if (!ef || ef.playerId !== state.userId || ef.phase !== 'select'){
     ui.effect2DropPending = false;
-    renderMyHand();
+    renderHands();
     return;
   }
 
-  const myId = state.userId;
+  if (!targetPlayerId || targetPlayerId === state.userId) return;
 
-  // ★重要：先に「クリックしたカードのrect」を確保（再描画でDOMが消える前）
   let fixedRect = null;
   if (cardEl && cardEl.getBoundingClientRect){
     const r = cardEl.getBoundingClientRect();
     fixedRect = { left:r.left, top:r.top, width:r.width, height:r.height };
   }
 
-  // クリックしたカードを青枠に（少し見せる）
-  ui.effect2SelectedIndex = cardIndex;
   ui.effect2DropPending = true;
   if (cardEl){
-    cardEl.classList.add('selected');
-    await sleep(60);
-    cardEl.classList.add('drag-source-hidden');
+    cardEl.classList.add('selected', 'drag-source-hidden');
   }
 
-  // DBからそのカードを抜く（値を取得）
-  const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${myId}/cards`);
+  const playedRef = ref(db, `rooms/${state.roomCode}/played/${targetPlayerId}`);
   let pickedValue = null;
 
-  const rem = await runTransaction(cardsRef, (cards) => {
+  const rem = await runTransaction(playedRef, (cards) => {
     const arr = Array.isArray(cards) ? [...cards] : [];
-    if (cardIndex < 0 || cardIndex >= arr.length) return arr;
-    pickedValue = arr.splice(cardIndex, 1)[0];
+    if (playedCardIndex < 0 || playedCardIndex >= arr.length) return arr;
+    pickedValue = arr.splice(playedCardIndex, 1)[0];
     return arr;
   }, { applyLocally:false });
 
-  if (!rem.committed || pickedValue === null || pickedValue === undefined){
+  if (!rem.committed || pickedValue == null){
     ui.effect2DropPending = false;
-    renderMyHand();
+    renderHands();
     return;
   }
 
-  if (!fixedRect){
-    const hr = myHandEl?.getBoundingClientRect?.();
-    if (hr){
-      fixedRect = { left: hr.left + hr.width*0.5, top: hr.top + hr.height*0.5, width: 60, height: 90 };
-    }
-  }
+  await animateReturnTopFromCardRectToDeck(fixedRect, pickedValue);
 
-  // 自分：移動アニメなし（他プレイヤーは裏アニメのみ）
-  // await animateReturnTopFromCardRectToDeck(fixedRect, pickedValue);
-
-  // 他プレイヤー：裏で「その人→山札」アニメ（イベント）
-  await emitReturnTopEvent(myId);
-
-  // 山札の一番上へ戻す（unshift）
   await unshiftCardToDeckAtomic(pickedValue);
 
-  // effect2終了
+  await runTransaction(ref(db, `rooms/${state.roomCode}/deck`), (deck) => {
+    const arr = Array.isArray(deck) ? [...deck] : [];
+    shuffleInPlace(arr);
+    return arr;
+  }, { applyLocally:false });
+
+  await emitKt4DeckShuffleEvent();
+
   await set(ref(db, `rooms/${state.roomCode}/effect2`), null);
 
   ui.effect2Selecting = false;
@@ -6020,6 +6111,7 @@ async function handleEffect2Pick(cardIndex, cardEl){
   ui.effect2DropPending = false;
   updateTurnUI();
   renderMyHand();
+  renderHands();
 
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
   await advanceTurnToNextPlayer();
@@ -6978,6 +7070,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeReturnTopEvent();
   subscribeReshuffleEvent();
   subscribeKt4ShuffleEvent();
+  subscribeEffect2DeckShuffleEvent();
   subscribeRuinMoveEvent();
   subscribeRuinTakeEvent();
   subscribeHandTransferEvent();
@@ -7507,6 +7600,8 @@ function renderPlayerCircle(players){
     }
 
     const playedArr = Array.isArray(state.played?.[p.id]) ? state.played[p.id] : [];
+    const e2MineSelecting = !!(ui.effect2Selecting && state.effect2 && state.effect2.playerId === state.userId && state.effect2.phase === 'select');
+    const e2PickablePlayed = e2MineSelecting && p.id !== state.userId && !isElim;
     if (playedArr.length){
       const row = document.createElement('div');
       row.className = 'played-row';
@@ -7555,6 +7650,9 @@ function renderPlayerCircle(players){
         setCardFace(c, v);
 
         const absIndex = sliceStart + localIndex;
+        c.dataset.value = String(v ?? '');
+        c.dataset.pid = p.id;
+        c.dataset.playedIndex = String(absIndex);
         const isUsedKt1 = (absIndex === usedKt1Index) && (String(v) === 'kt1');
 
         if (!parallel){
@@ -7567,7 +7665,20 @@ function renderPlayerCircle(players){
           c.classList.add('kt1-used');
         }
 
-        c.addEventListener('pointerdown', (ev) => startZoomTap(ev, c));
+        c.addEventListener('pointerdown', (ev) => {
+          if (e2PickablePlayed){
+            onPlayedCardPointerDown(ev);
+            return;
+          }
+          startZoomTap(ev, c);
+        });
+        c.addEventListener('pointermove', onCardPointerMove);
+        c.addEventListener('pointerup', onCardPointerUp);
+        c.addEventListener('pointercancel', onCardPointerUp);
+
+        if (e2PickablePlayed){
+          c.classList.add('effect2-pickable');
+        }
 
         row.appendChild(c);
       });
@@ -7659,6 +7770,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/xRevealEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/oneRevealEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/kt4ShuffleEvent`), null),
+    set(ref(db, `rooms/${state.roomCode}/effect2DeckShuffleEvent`), null),
   ]);
 
   if (initialDrawDisp){
@@ -7710,6 +7822,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/xRevealEvent`)),
     remove(ref(db, `${base}/oneRevealEvent`)),
     remove(ref(db, `${base}/kt4ShuffleEvent`)),
+    remove(ref(db, `${base}/effect2DeckShuffleEvent`)),
     remove(ref(db, `${base}/explorationFaceEvent`)),
     remove(ref(db, `${base}/explorationPickEvent`)),
     remove(ref(db, `${base}/handTransferEvent`)),
