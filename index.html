@@ -6733,8 +6733,9 @@ async function eliminatePlayerWithKt1Check(playerId, seq = null){
   const revived = await tryReviveWithKt1(playerId, seq);
   if (revived) return false;
 
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
+  // タグ表示を先に切り替えて体感遅延を減らす
   state.eliminated = { ...(state.eliminated || {}), [playerId]: true };
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
   return true;
 }
 
