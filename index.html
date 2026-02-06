@@ -3675,7 +3675,7 @@ function subscribeRuinMoveEvent(){
     const fromPlayedIndex = Number(ev.fromPlayedIndex);
 
     if (!fromPid) return;
-    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played' && mode !== 'kt6DeckTop') return;
+    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played' && mode !== 'kt6DeckTop' && mode !== 'kt6DiscardMove') return;
 
     if (mode === 'oneReveal' || mode === 'kt8'){
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
@@ -6302,14 +6302,14 @@ async function animateKt6DiscardMoveToRuin(playerId, playedIndex, cardValue, slo
   setCardFace(flyer, cardValue);
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1.1)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1)';
   document.body.appendChild(flyer);
 
   await sleep(0);
   flyer.style.transition = 'left 520ms cubic-bezier(0.22, 1, 0.36, 1), top 520ms cubic-bezier(0.22, 1, 0.36, 1), transform 520ms cubic-bezier(0.22, 1, 0.36, 1)';
   flyer.style.left = `${endX}px`;
   flyer.style.top  = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(0.7)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(1)';
   await sleep(540);
 
   await waitForRuinCard(slotIndex);
@@ -6519,7 +6519,7 @@ async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
   setCardFace(flyer, cardValue);
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1.1)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1)';
   document.body.appendChild(flyer);
 
   await sleep(0);
@@ -6531,7 +6531,7 @@ async function animateOneRevealMoveToRuin(playerId, cardValue, slotIndex){
   flyer.style.transition = 'left 520ms cubic-bezier(0.22, 1, 0.36, 1), top 520ms cubic-bezier(0.22, 1, 0.36, 1), transform 520ms cubic-bezier(0.22, 1, 0.36, 1)';
   flyer.style.left = `${endX}px`;
   flyer.style.top  = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(0.7)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(1)';
   await sleep(540);
 
   flyer.style.transition = 'background 120ms ease, color 120ms ease, opacity 120ms ease';
@@ -6579,7 +6579,7 @@ async function animateXRevealMoveToRuin(playerId, cardIndex, slotIndex){
   const flyer = createFaceFlyer('x');
   flyer.style.left = `${startX}px`;
   flyer.style.top = `${startY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1.1)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1)';
   document.body.appendChild(flyer);
 
   await sleep(0);
@@ -6591,7 +6591,7 @@ async function animateXRevealMoveToRuin(playerId, cardIndex, slotIndex){
   flyer.style.transition = 'left 520ms cubic-bezier(0.22, 1, 0.36, 1), top 520ms cubic-bezier(0.22, 1, 0.36, 1), transform 520ms cubic-bezier(0.22, 1, 0.36, 1)';
   flyer.style.left = `${endX}px`;
   flyer.style.top = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(0.7)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(1)';
   await sleep(540);
 
   flyer.style.transition = 'background 120ms ease, color 120ms ease, opacity 120ms ease';
