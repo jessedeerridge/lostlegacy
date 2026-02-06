@@ -782,7 +782,7 @@
     position:absolute;
     width:42px;height:62px;
     border-radius:10px;
-    transform:translate(-50%,-50%);
+    transform:translate(-50%,-50%) scale(var(--ruin-card-scale, 1));
     display:flex;align-items:center;justify-content:center;
   }
   .ruins-slot{
@@ -835,6 +835,25 @@
     touch-action:none;
     animation: ruinsPulse 760ms ease-in-out infinite;
     outline:2px solid rgba(37,99,235,.0);
+  }
+  .ruins-card.kt3-selectable{
+    pointer-events:auto;
+    cursor:pointer;
+    animation: ruinsPulse 760ms ease-in-out infinite;
+  }
+  .ruins-card.kt3-selected{
+    --ruin-card-scale: 1.2;
+    z-index:14;
+    pointer-events:auto;
+    cursor:pointer;
+    animation:none;
+  }
+  .ruins-card.kt3-pickable{
+    pointer-events:auto;
+    cursor:grab;
+    touch-action:none;
+    animation: ruinsPulse 760ms ease-in-out infinite;
+    outline:2px solid rgba(37,99,235,.55);
   }
   .ruins-card.pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
@@ -1883,6 +1902,7 @@ const state = {
   effect6: null,
   effect7: null,
   effect8: null,
+  effectKt3: null,
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
@@ -1909,6 +1929,12 @@ const ui = {
   effect7Placing: false,
   effect7TargetSlot: null,
   effect7PickedValue: null,
+
+  effectKt3Selecting: false,
+  effectKt3Returning: false,
+  effectKt3SelectableSlots: [],
+  effectKt3SelectedSlots: [],
+  effectKt3TargetSlot: null,
 
   effect8Selecting: false,
   effect8Returning: false,
@@ -2900,6 +2926,7 @@ function calcIsPlayable(){
   if (ui.effect4Selecting) return false;
   if (ui.effect6Selecting) return false;
   if (ui.effect7Picking || ui.effect7Placing) return false;
+  if (ui.effectKt3Selecting || ui.effectKt3Returning) return false;
   if (ui.effect8Selecting || ui.effect8Returning) return false;
 
   // 脱落者は操作不可
@@ -2915,8 +2942,11 @@ function updateTurnUI(){
   myHandEl.classList.toggle('is-playable', state.isPlayable);
   myHandEl.classList.toggle('effect2-pick', ui.effect2Selecting);
   myHandEl.classList.toggle('effect6-pick', ui.effect6Selecting);
-  myHandEl.classList.toggle('effect7-place', ui.effect7Placing);
+  myHandEl.classList.toggle('effect7-place', ui.effect7Placing || ui.effectKt3Returning);
   myHandEl.classList.toggle('effect8-return', ui.effect8Returning);
+  const kt3Picking = !!(state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'pickRuins');
+  myHandRow.classList.toggle('effect7-pick-target', kt3Picking || e7pickDrag.active);
+  if (!e7pickDrag.active) myHandRow.classList.remove('effect7-pick-active');
 
   playerCircle.classList.toggle('turn-paused', !!state.turn.paused);
 
@@ -3145,17 +3175,48 @@ function subscribeEffect6(){
 function subscribeEffect7(){
   const eRef = ref(db, `rooms/${state.roomCode}/effect7`);
   onValue(eRef, snap => {
-    state.effect7 = snap.val() || null;
+    const raw = snap.val() || null;
+    const mine = raw && raw.playerId === state.userId;
+    const mode = String(raw?.mode || 'normal');
 
-    const mine = state.effect7 && state.effect7.playerId === state.userId;
-    const picking = !!(mine && state.effect7.phase === 'pickRuins');
-    const placing = !!(mine && state.effect7.phase === 'placeBack');
+    if (mode === 'kt3'){
+      state.effectKt3 = raw;
+      state.effect7 = null;
 
-    ui.effect7Picking = picking;
-    ui.effect7Placing = placing;
-    ui.effect7TargetSlot = mine ? (state.effect7?.targetSlotIndex ?? null) : null;
-    ui.effect7PickedValue = mine ? (state.effect7?.pickedValue ?? null) : null;
-    if (!picking && e7pickDrag.active) cleanupE7PickDrag({ keepSourceHidden: true });
+      const phase = raw?.phase || null;
+      const selecting = !!(mine && phase === 'selectRuins');
+      const returning = !!(mine && phase === 'placeBack');
+
+      ui.effectKt3Selecting = selecting;
+      ui.effectKt3Returning = returning;
+      ui.effectKt3SelectableSlots = mine && Array.isArray(raw?.selectableSlots) ? raw.selectableSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+      ui.effectKt3SelectedSlots = mine && Array.isArray(raw?.selectedSlots) ? raw.selectedSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+      ui.effectKt3TargetSlot = mine ? (raw?.targetSlotIndex ?? null) : null;
+
+      ui.effect7Picking = false;
+      ui.effect7Placing = false;
+      ui.effect7TargetSlot = null;
+      ui.effect7PickedValue = null;
+      if (e7pickDrag.active) cleanupE7PickDrag({ keepSourceHidden: true });
+    } else {
+      state.effect7 = raw;
+      state.effectKt3 = null;
+
+      const picking = !!(mine && raw?.phase === 'pickRuins');
+      const placing = !!(mine && raw?.phase === 'placeBack');
+
+      ui.effect7Picking = picking;
+      ui.effect7Placing = placing;
+      ui.effect7TargetSlot = mine ? (raw?.targetSlotIndex ?? null) : null;
+      ui.effect7PickedValue = mine ? (raw?.pickedValue ?? null) : null;
+      if (!picking && e7pickDrag.active) cleanupE7PickDrag({ keepSourceHidden: true });
+
+      ui.effectKt3Selecting = false;
+      ui.effectKt3Returning = false;
+      ui.effectKt3SelectableSlots = [];
+      ui.effectKt3SelectedSlots = [];
+      ui.effectKt3TargetSlot = null;
+    }
 
     updateTurnUI();
     renderHands();
@@ -3808,11 +3869,11 @@ function onCardPointerDown(e){
     return;
   }
 
-  if (ui.effect7Placing){
+  if (ui.effect7Placing || ui.effectKt3Returning){
     const idx = Number(cardEl.dataset.index);
     if (!Number.isFinite(idx)) return;
 
-    const slotIndex = Number(ui.effect7TargetSlot);
+    const slotIndex = ui.effectKt3Returning ? Number(ui.effectKt3TargetSlot) : Number(ui.effect7TargetSlot);
     if (!Number.isFinite(slotIndex)) return;
 
     setHintRuinSlotHighlight(slotIndex);
@@ -4036,7 +4097,10 @@ async function onCardPointerUp(e){
     const shouldDrop = e7drag.overSlot;
     cleanupE7Drag({ keepSourceHidden: shouldDrop });
     try { cardEl.releasePointerCapture(e.pointerId); } catch {}
-    if (shouldDrop) await handleEffect7Drop(idx);
+    if (shouldDrop){
+      const dropped = await handleEffect7Drop(idx);
+      if (!dropped) cardEl.classList.remove('drag-source-hidden');
+    }
     return;
   }
 
@@ -4090,8 +4154,9 @@ function onRuinPointerDown(e){
 
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
-  if (!ui.effect7Picking) return;
-  if (!state.effect7 || state.effect7.playerId !== state.userId || state.effect7.phase !== 'pickRuins') return;
+  const normal7 = !!(ui.effect7Picking && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'pickRuins');
+  const kt3 = !!(state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'pickRuins');
+  if (!normal7 && !kt3) return;
 
   const slotIndex = Number(cardEl.dataset.i);
   if (!Number.isFinite(slotIndex)) return;
@@ -4115,6 +4180,7 @@ function onRuinPointerDown(e){
   setHandDropActive(false);
 
   addRuinPickListeners();
+  try { cardEl.setPointerCapture(e.pointerId); } catch {}
   e.preventDefault();
 }
 
@@ -4136,9 +4202,17 @@ async function onRuinPointerUp(e){
 
   const slotIndex = e7pickDrag.slotIndex;
   const shouldDrop = e7pickDrag.overHand;
+  const sourceEl = e7pickDrag.sourceEl;
   cleanupE7PickDrag({ keepSourceHidden: shouldDrop });
   removeRuinPickListeners();
-  if (shouldDrop) await handleEffect7Pick(slotIndex);
+  try { sourceEl?.releasePointerCapture(e.pointerId); } catch {}
+  if (shouldDrop){
+    if (state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'pickRuins'){
+      await handleKt3Pick(slotIndex);
+    } else {
+      await handleEffect7Pick(slotIndex);
+    }
+  }
   e.preventDefault();
 }
 
@@ -5542,6 +5616,10 @@ async function playCardFromHand(cardIndex){
     await resolveEffect7(myId);
     return;
   }
+  if (usedKey === 'kt3'){
+    await resolveKt3(myId);
+    return;
+  }
   if (usedKey === '8'){
     await resolveEffect8(myId);
     return;
@@ -5557,6 +5635,7 @@ async function playCardFromHand(cardIndex){
 
   await resolveCardEffectPlaceholder(used);
   await advanceTurnToNextPlayer();
+  return true;
 }
 
 async function resolveCardEffectPlaceholder(usedCard){
@@ -6329,6 +6408,125 @@ async function resolveEffect7(playerId){
   });
 }
 
+async function resolveKt3(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  const slots = getRuinsSlots();
+  const filled = [];
+  for (let i=0;i<6;i++) if (slots[i]) filled.push(i);
+  if (!filled.length){
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await update(turnRef, { paused:true });
+
+  const selectable = [...filled];
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'selectRuins',
+    at: Date.now(),
+    mode: 'kt3',
+    selectableSlots: selectable,
+    selectedSlots: [],
+    targetSlotIndex: null,
+    pickedValue: null,
+  });
+}
+
+async function handleKt3Select(slotIndex){
+  if (!state.roomCode) return;
+
+  const ef = state.effectKt3;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'selectRuins') return;
+
+  const idx = Number(slotIndex);
+  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+
+  const selectable = Array.isArray(ef.selectableSlots) ? ef.selectableSlots.map(Number) : [];
+  if (!selectable.includes(idx)) return;
+
+  const selected = Array.isArray(ef.selectedSlots) ? ef.selectedSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  if (selected.includes(idx)) return;
+
+  const nextSelected = selected.concat(idx);
+  const limit = Math.min(2, selectable.length);
+
+  if (nextSelected.length < limit){
+    await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+      ...ef,
+      phase: 'selectRuins',
+      at: Date.now(),
+      selectedSlots: nextSelected,
+    });
+    return;
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    ...ef,
+    phase: 'pickRuins',
+    at: Date.now(),
+    selectedSlots: nextSelected,
+    selectableSlots: nextSelected,
+  });
+}
+
+async function handleKt3Pick(slotIndex){
+  if (!state.roomCode) return;
+
+  const ef = state.effectKt3;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'pickRuins') return;
+
+  const idx = Number(slotIndex);
+  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+
+  const selected = Array.isArray(ef.selectedSlots) ? ef.selectedSlots.map(Number) : [];
+  if (!selected.includes(idx)) return;
+
+  const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+  const myId = state.userId;
+  let pickedObj = null;
+
+  const res = await runTransaction(ruinsRef, (ruins) => {
+    const src = Array.isArray(ruins) ? [...ruins] : [];
+    const slots = new Array(6).fill(null);
+    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    if (!slots[idx]) return slots;
+    pickedObj = slots[idx];
+    slots[idx] = null;
+    return slots;
+  }, { applyLocally:false });
+
+  if (!res.committed || !pickedObj) return;
+
+  const cardValue = String(pickedObj?.v ?? '');
+
+  const localSlots = getRuinsSlots();
+  if (idx >= 0 && idx < localSlots.length){
+    localSlots[idx] = null;
+    state.ruins = localSlots;
+    renderHands();
+  }
+
+  await emitRuinTakeEvent(myId, cardValue, idx);
+  await addCardToHandAtomic(myId, cardValue);
+
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    ...ef,
+    playerId: myId,
+    seq: Number(ef.seq || 0),
+    phase: 'placeBack',
+    at: Date.now(),
+    targetSlotIndex: idx,
+    pickedValue: cardValue,
+  });
+}
+
 async function handleEffect7Pick(slotIndex){
   if (!state.roomCode) return;
 
@@ -6382,13 +6580,17 @@ async function handleEffect7Pick(slotIndex){
 }
 
 async function handleEffect7Drop(cardIndex){
-  if (!state.roomCode) return;
+  if (!state.roomCode) return false;
 
-  const ef = state.effect7;
-  if (!ef || ef.playerId !== state.userId || ef.phase !== 'placeBack') return;
+  const ef7 = state.effect7;
+  const efKt3 = state.effectKt3;
+  const ef = (ef7 && ef7.playerId === state.userId && ef7.phase === 'placeBack')
+    ? ef7
+    : ((efKt3 && efKt3.playerId === state.userId && efKt3.phase === 'placeBack') ? efKt3 : null);
+  if (!ef) return false;
 
   const slotIndex = Number(ef.targetSlotIndex);
-  if (!Number.isFinite(slotIndex) || slotIndex < 0 || slotIndex > 5) return;
+  if (!Number.isFinite(slotIndex) || slotIndex < 0 || slotIndex > 5) return false;
 
   const myId = state.userId;
   const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${myId}/cards`);
@@ -6401,7 +6603,7 @@ async function handleEffect7Drop(cardIndex){
     return arr;
   }, { applyLocally:false });
 
-  if (!rem.committed || removedValue == null) return;
+  if (!rem.committed || removedValue == null) return false;
 
   const localSlots = getRuinsSlots();
   if (Number.isFinite(slotIndex) && slotIndex >= 0 && slotIndex < localSlots.length){
@@ -6431,11 +6633,18 @@ async function handleEffect7Drop(cardIndex){
   ui.effect7Placing = false;
   ui.effect7TargetSlot = null;
   ui.effect7PickedValue = null;
+  ui.effectKt3Selecting = false;
+  ui.effectKt3Returning = false;
+  ui.effectKt3SelectableSlots = [];
+  ui.effectKt3SelectedSlots = [];
+  ui.effectKt3TargetSlot = null;
+  state.effectKt3 = null;
   updateTurnUI();
   renderMyHand();
 
   await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
   await advanceTurnToNextPlayer();
+  return true;
 }
 
 /* =========================
@@ -6906,8 +7115,11 @@ function renderRuinsArea(){
   const mine6Selecting = !!(ui.effect6Selecting && state.effect6 && state.effect6.playerId === state.userId && state.effect6.phase === 'select');
   const mine7Picking   = !!(ui.effect7Picking && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'pickRuins');
   const mine7Placing   = !!(ui.effect7Placing && state.effect7 && state.effect7.playerId === state.userId && state.effect7.phase === 'placeBack');
+  const mineKt3Selecting = !!(ui.effectKt3Selecting && state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'selectRuins');
+  const mineKt3Picking   = !!(state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'pickRuins');
+  const mineKt3Placing   = !!(ui.effectKt3Returning && state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'placeBack');
 
-  if (mine6Selecting || mine7Picking || mine7Placing) wrap.classList.add('drop-enabled');
+  if (mine6Selecting || mine7Picking || mine7Placing || mineKt3Picking || mineKt3Placing) wrap.classList.add('drop-enabled');
 
   const slots = getRuinsSlots();
 
@@ -6915,7 +7127,7 @@ function renderRuinsArea(){
     const slot = document.createElement('div');
     slot.className = 'ruins-slot';
     slot.dataset.i = String(i);
-    if (mine7Placing && Number(ui.effect7TargetSlot) === i) slot.classList.add('hint-target');
+    if ((mine7Placing && Number(ui.effect7TargetSlot) === i) || (mineKt3Placing && Number(ui.effectKt3TargetSlot) === i)) slot.classList.add('hint-target');
     wrap.appendChild(slot);
   }
 
@@ -6941,6 +7153,31 @@ function renderRuinsArea(){
       card.addEventListener('pointermove', onRuinPointerMove);
       card.addEventListener('pointerup', onRuinPointerUp);
       card.addEventListener('pointercancel', onRuinPointerUp);
+    }
+
+    if (mineKt3Selecting){
+      const selectable = ui.effectKt3SelectableSlots || [];
+      const selected = ui.effectKt3SelectedSlots || [];
+      if (selectable.includes(i)){
+        card.classList.add('kt3-selectable');
+        card.addEventListener('click', () => handleKt3Select(i));
+      }
+      if (selected.includes(i)){
+        card.classList.add('kt3-selected', 'exploration-front');
+        setCardFace(card, item?.v ?? item);
+      }
+    }
+
+    if (mineKt3Picking){
+      const selected = ui.effectKt3SelectedSlots || [];
+      if (selected.includes(i)){
+        card.classList.add('kt3-pickable', 'exploration-front');
+        setCardFace(card, item?.v ?? item);
+        card.addEventListener('pointerdown', onRuinPointerDown);
+        card.addEventListener('pointermove', onRuinPointerMove);
+        card.addEventListener('pointerup', onRuinPointerUp);
+        card.addEventListener('pointercancel', onRuinPointerUp);
+      }
     }
 
     wrap.appendChild(card);
