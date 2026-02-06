@@ -851,6 +851,7 @@
   .ruins-card.kt3-pickable{
     pointer-events:auto;
     cursor:grab;
+    touch-action:none;
     animation: ruinsPulse 760ms ease-in-out infinite;
     outline:2px solid rgba(37,99,235,.55);
   }
@@ -4179,6 +4180,7 @@ function onRuinPointerDown(e){
   setHandDropActive(false);
 
   addRuinPickListeners();
+  try { cardEl.setPointerCapture(e.pointerId); } catch {}
   e.preventDefault();
 }
 
@@ -4200,8 +4202,10 @@ async function onRuinPointerUp(e){
 
   const slotIndex = e7pickDrag.slotIndex;
   const shouldDrop = e7pickDrag.overHand;
+  const sourceEl = e7pickDrag.sourceEl;
   cleanupE7PickDrag({ keepSourceHidden: shouldDrop });
   removeRuinPickListeners();
+  try { sourceEl?.releasePointerCapture(e.pointerId); } catch {}
   if (shouldDrop){
     if (state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'pickRuins'){
       await handleKt3Pick(slotIndex);
