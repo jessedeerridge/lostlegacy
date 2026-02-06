@@ -6514,22 +6514,28 @@ async function checkAndHandleKtXElimination(playerId, { seq = null } = {}){
   const ktxCount = played.reduce((n, v) => n + (normalizeCardValue(v) === 'ktx' ? 1 : 0), 0);
   if (ktxCount < 2) return false;
 
-  const slotsNow = getRuinsSlots();
-  const slotIndex = firstEmptyRuinSlotIndex(slotsNow);
-
   const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`);
-  let movedValue = null;
-  const rem = await runTransaction(cardsRef, (cards) => {
-    const arr = Array.isArray(cards) ? [...cards] : [];
-    if (arr.length === 1 && slotIndex !== null){
-      movedValue = String(arr[0] ?? '');
-      return [];
-    }
-    return arr;
-  }, { applyLocally:false });
+  const handSnap = await get(cardsRef);
+  const handCards = Array.isArray(handSnap.val()) ? [...handSnap.val()] : [];
 
-  if (rem.committed && movedValue != null && slotIndex !== null){
-    await emitRuinMoveEvent(playerId, movedValue, slotIndex, 'ktxElimination');
+  for (const rawValue of handCards){
+    const value = String(rawValue ?? '');
+    const slotsNow = getRuinsSlots();
+    const slotIndex = firstEmptyRuinSlotIndex(slotsNow);
+    if (slotIndex === null) break;
+
+    let removedValue = null;
+    const rem = await runTransaction(cardsRef, (cards) => {
+      const arr = Array.isArray(cards) ? [...cards] : [];
+      if (!arr.length) return arr;
+      const idx = arr.findIndex(v => String(v ?? '') === value);
+      if (idx < 0) return arr;
+      removedValue = String(arr.splice(idx, 1)[0] ?? '');
+      return arr;
+    }, { applyLocally:false });
+    if (!rem.committed || removedValue == null) continue;
+
+    await emitRuinMoveEvent(playerId, removedValue, slotIndex, 'ktxElimination');
     await sleep(RUIN_MOVE_ANIM_MS);
 
     const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
@@ -6538,7 +6544,7 @@ async function checkAndHandleKtXElimination(playerId, { seq = null } = {}){
       const slots = new Array(6).fill(null);
       for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
       if (slots[slotIndex]) return slots;
-      slots[slotIndex] = { v: String(movedValue), by: playerId, at: Date.now() };
+      slots[slotIndex] = { v: String(removedValue), by: playerId, at: Date.now() };
       return slots;
     }, { applyLocally:false });
   }
