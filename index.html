@@ -3444,6 +3444,12 @@ function subscribeKt2ShuffleEvent(){
     const now = Date.now();
     if (ev.at && (now - ev.at) > 15000) return;
 
+    const fromPlayerId = String(ev.fromPlayerId || '');
+    const byPlayerId = String(ev.byPlayerId || '');
+    if (fromPlayerId && byPlayerId && byPlayerId !== state.userId){
+      animateReturnTopFromPlayerAnchorToDeck(fromPlayerId);
+    }
+
     const count = Number(ev.count || 1);
     animateKt2ShuffleToDeck(count);
   });
@@ -4658,6 +4664,7 @@ async function emitKt2ShuffleEvent(count = 1, byPlayerId = null){
     id,
     count: Math.max(1, Number(count || 1)),
     byPlayerId: byPlayerId || null,
+    fromPlayerId: null,
     at: Date.now(),
   });
 }
@@ -4945,7 +4952,7 @@ async function animateKt2ShuffleToDeck(count = 1){
   const deckX = dr.left + dr.width / 2;
   const deckY = dr.top + dr.height / 2;
 
-  const n = Math.min(Math.max(2, Number(count || 1)), 6);
+  const n = Math.min(Math.max(3, Number(count || 1)), 6);
   const flyers = [];
 
   for (let i = 0; i < n; i++){
@@ -4980,7 +4987,7 @@ async function animateKt2ShuffleToDeck(count = 1){
   const TILT_MORE = 5;
   const DUR = 200;
   const PAUSE = 16;
-  const loops = Math.min(3, Math.max(1, flyers.length - 1));
+  const loops = Math.min(2, Math.max(2, flyers.length - 1));
 
   for (let k = 0; k < loops; k++){
     const frontIdx = flyers.length - 1;
@@ -5013,20 +5020,14 @@ async function animateKt2ShuffleToDeck(count = 1){
     await sleep(PAUSE);
   }
 
-  flyers.forEach((f, i) => {
-    f.style.transition = 'left 260ms ease, top 260ms ease, transform 260ms ease, opacity 150ms ease';
-    f.style.left = `${deckX}px`;
-    f.style.top = `${deckY}px`;
-    f.style.transform = `translate(-50%,-50%) rotate(${(i % 2 ? 12 : -12)}deg) scale(0.56)`;
-  });
-
-  await sleep(290);
   flyers.forEach(f => {
+    f.style.transition = 'opacity 140ms ease';
     f.style.opacity = '0';
   });
+  await sleep(160);
 
   deckPile.classList.add('shuffling');
-  await sleep(360);
+  await sleep(520);
 
   flyers.forEach(f => f.remove());
   deckPile.classList.remove('shuffling');
@@ -6461,7 +6462,14 @@ async function handleKt2Drop(fromPlayerId, fromPlayedIndex, sourceEl = null){
   }
 
   await unshiftCardToDeckAtomic(picked);
-  await emitKt2ShuffleEvent(1, state.userId);
+  const evId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`), {
+    id: evId,
+    count: 1,
+    byPlayerId: state.userId,
+    fromPlayerId: fromPlayerId || null,
+    at: Date.now(),
+  });
   await sleep(1100);
 
   await set(ref(db, `rooms/${state.roomCode}/effectKt2`), null);
