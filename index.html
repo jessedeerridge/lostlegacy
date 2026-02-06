@@ -5718,9 +5718,9 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
     flyers = idxs.map((_, i) => {
       const flyer = document.createElement('div');
       flyer.className = 'reshuffle-flyer';
-      flyer.style.left = `${cx + (i === 0 ? -5 : 5)}px`;
-      flyer.style.top = `${cy + 4}px`;
-      flyer.style.transform = `translate(-50%,-50%) rotate(${i === 0 ? -2 : 2}deg) scale(1.02)`;
+      flyer.style.left = `${cx + (((i * 11) % 16) - 8)}px`;
+      flyer.style.top = `${cy + (((i * 7) % 12) - 6)}px`;
+      flyer.style.transform = `translate(-50%,-50%) rotate(${((i * 13) % 18) - 9}deg) scale(0.9)`;
       flyer.style.zIndex = String(4300 + i);
       document.body.appendChild(flyer);
       return flyer;
@@ -5728,24 +5728,25 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
   }
 
   const stackPoints = flyers.map((_, i) => ({
-    x: cx + (i * 4),
-    y: cy + (i * 4),
-    rot: i === 0 ? 2 : -2,
+    x: cx + (((i * 3) % 8) - 4),
+    y: cy + (((i * 2) % 8) - 4),
+    rot: 4,
   }));
 
   flyers.forEach((f, i) => {
     const p = stackPoints[i];
-    f.style.transition = 'left 220ms ease-in-out, top 220ms ease-in-out, transform 220ms ease-in-out';
+    f.style.transition = 'left 180ms ease-in-out, top 180ms ease-in-out, transform 180ms ease-in-out';
     f.style.left = `${p.x}px`;
     f.style.top = `${p.y}px`;
-    f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.92)`;
+    f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.86)`;
     f.style.zIndex = String(4300 + i);
   });
-  await sleep(240);
+  await sleep(200);
 
   const OUT_X = 42;
   const TILT_MORE = 0;
   const DUR = 200;
+  const PAUSE = 16;
   const loops = 2;
 
   for (let k = 0; k < loops; k++){
@@ -5753,12 +5754,13 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
     const backIdx = flyers.length - 2;
     const frontCard = flyers[frontIdx];
     const frontPoint = stackPoints[frontIdx];
-    if (!frontCard || !frontPoint || backIdx < 0) break;
+    const backPoint = stackPoints[backIdx];
+    if (!frontCard || !frontPoint || !backPoint) break;
 
     frontCard.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
     frontCard.style.left = `${frontPoint.x + OUT_X}px`;
     frontCard.style.top = `${frontPoint.y}px`;
-    frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.92)`;
+    frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.86)`;
     await sleep(DUR);
 
     const movedPoint = stackPoints.pop();
@@ -5773,9 +5775,9 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
     movedFlyer.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
     movedFlyer.style.left = `${stackPoints[backIdx].x}px`;
     movedFlyer.style.top = `${stackPoints[backIdx].y}px`;
-    movedFlyer.style.transform = `translate(-50%,-50%) rotate(${stackPoints[backIdx].rot}deg) scale(0.92)`;
+    movedFlyer.style.transform = `translate(-50%,-50%) rotate(${stackPoints[backIdx].rot}deg) scale(0.86)`;
     await sleep(DUR);
-    await sleep(20);
+    await sleep(PAUSE);
   }
 
   const order = swapped && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
