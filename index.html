@@ -409,6 +409,7 @@
   }
   .played-card.kt2-pickable{
     cursor:grab;
+    touch-action:none;
     animation: fanPickPulse 760ms ease-in-out infinite;
   }
   .played-card.kt2-pickable:hover{
@@ -3445,9 +3446,10 @@ function subscribeKt2ShuffleEvent(){
     if (ev.at && (now - ev.at) > 15000) return;
 
     const fromPlayerId = String(ev.fromPlayerId || '');
+    const fromPlayedIndex = Number(ev.fromPlayedIndex);
     const byPlayerId = String(ev.byPlayerId || '');
     if (fromPlayerId && byPlayerId && byPlayerId !== state.userId){
-      animateReturnTopFromPlayerAnchorToDeck(fromPlayerId);
+      animateReturnTopFromPlayedCardToDeck(fromPlayerId, fromPlayedIndex);
     }
 
     const count = Number(ev.count || 1);
@@ -3820,6 +3822,7 @@ function onKt2PlayedPointerDown(e, cardEl){
 
 function onKt2PlayedPointerMove(e){
   if (!kt2drag.active || kt2drag.pointerId !== e.pointerId || !kt2drag.ghostEl) return;
+  e.preventDefault();
   kt2drag.ghostEl.style.left = `${e.clientX}px`;
   kt2drag.ghostEl.style.top  = `${e.clientY}px`;
 
@@ -4665,6 +4668,7 @@ async function emitKt2ShuffleEvent(count = 1, byPlayerId = null){
     count: Math.max(1, Number(count || 1)),
     byPlayerId: byPlayerId || null,
     fromPlayerId: null,
+    fromPlayedIndex: null,
     at: Date.now(),
   });
 }
@@ -5143,6 +5147,55 @@ async function animateReturnTopFromPlayerAnchorToDeck(playerId){
   await sleep(160);
 
   flyer.remove();
+}
+
+
+async function animateReturnTopFromPlayedCardToDeck(playerId, playedIndex){
+  if (!deckPile) return;
+
+  const to = deckPile.getBoundingClientRect();
+  const endX = to.left + to.width/2;
+  const endY = to.top  + to.height/2;
+
+  const cardEl = Number.isFinite(Number(playedIndex))
+    ? playerCircle.querySelector(`.played-card[data-pid="${playerId}"][data-played-index="${Number(playedIndex)}"]`)
+    : null;
+
+  if (cardEl){
+    const cr = cardEl.getBoundingClientRect();
+    const startX = cr.left + cr.width / 2;
+    const startY = cr.top + cr.height / 2;
+    const cardValue = String(cardEl.dataset.value || '');
+
+    const flyer = createFaceFlyer(cardValue);
+    flyer.style.left = `${startX}px`;
+    flyer.style.top  = `${startY}px`;
+    flyer.style.transform = 'translate(-50%,-50%) rotate(-8deg) scale(1.0)';
+    document.body.appendChild(flyer);
+
+    cardEl.classList.add('drag-source-hidden');
+
+    await sleep(0);
+    flyer.style.transition = 'transform 120ms ease, top 120ms ease';
+    flyer.style.top = `${startY - 14}px`;
+    flyer.style.transform = 'translate(-50%,-50%) rotate(-14deg) scale(1.06)';
+    await sleep(140);
+
+    flyer.style.transition = 'left 360ms ease, top 360ms ease, transform 360ms ease';
+    flyer.style.left = `${endX}px`;
+    flyer.style.top  = `${endY}px`;
+    flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(0.82)';
+    await sleep(380);
+
+    flyer.style.transition = 'opacity 120ms ease, transform 120ms ease';
+    flyer.style.opacity = '0';
+    flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.76)';
+    await sleep(140);
+    flyer.remove();
+    return;
+  }
+
+  await animateReturnTopFromPlayerAnchorToDeck(playerId);
 }
 
 /* ★②：自分視点：選んだカード(表/数字)→山札 */
@@ -6455,6 +6508,18 @@ async function handleKt2Drop(fromPlayerId, fromPlayedIndex, sourceEl = null){
   if (!ef || ef.playerId !== state.userId || ef.phase !== 'select') return;
   if (!fromPlayerId || fromPlayerId === state.userId) return;
 
+  const evId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`), {
+    id: evId,
+    count: 1,
+    byPlayerId: state.userId,
+    fromPlayerId: fromPlayerId || null,
+    fromPlayedIndex: Number.isFinite(Number(fromPlayedIndex)) ? Number(fromPlayedIndex) : null,
+    at: Date.now(),
+  });
+
+  await sleep(420);
+
   const picked = await removePlayedCardByIndex(fromPlayerId, fromPlayedIndex);
   if (picked == null){
     if (sourceEl) sourceEl.classList.remove('drag-source-hidden');
@@ -6462,15 +6527,7 @@ async function handleKt2Drop(fromPlayerId, fromPlayedIndex, sourceEl = null){
   }
 
   await unshiftCardToDeckAtomic(picked);
-  const evId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  await set(ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`), {
-    id: evId,
-    count: 1,
-    byPlayerId: state.userId,
-    fromPlayerId: fromPlayerId || null,
-    at: Date.now(),
-  });
-  await sleep(1100);
+  await sleep(680);
 
   await set(ref(db, `rooms/${state.roomCode}/effectKt2`), null);
   ui.effectKt2Selecting = false;
