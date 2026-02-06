@@ -5412,6 +5412,7 @@ async function clearEffectsForXReveal(){
   if (!state.roomCode) return;
   await Promise.all([
     set(ref(db, `rooms/${state.roomCode}/effect3`), null),
+    set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
   ]);
 }
@@ -5930,14 +5931,15 @@ async function handleEffect4Pick(targetPlayerId, cardIndex){
 
   const idx = Math.max(0, Math.min(cards.length - 1, Number(cardIndex||0)));
   const revealed = String(cards[idx] ?? '');
+  const revealedKey = normalizeCardValue(revealed);
   const mode = String(ef.mode || 'normal');
 
-  if (mode !== 'kt4' && revealed === '1'){
+  if (revealedKey === '1'){
     await resolveOneReveal(targetPlayerId, idx, null, state.userId);
     return;
   }
 
-  if (mode !== 'kt4' && (revealed === 'x' || revealed === '✕')){
+  if (revealedKey === 'x'){
     await set(ref(db, `rooms/${state.roomCode}/effect4`), {
       id: ef.id,
       playerId: ef.playerId,
@@ -5949,7 +5951,11 @@ async function handleEffect4Pick(targetPlayerId, cardIndex){
       revealed,
       mode,
     });
-    await resolveEffect4XReveal(targetPlayerId, idx);
+    if (mode === 'kt4'){
+      await resolveXReveal(targetPlayerId, idx, null, state.userId);
+    } else {
+      await resolveEffect4XReveal(targetPlayerId, idx);
+    }
     return;
   }
 
