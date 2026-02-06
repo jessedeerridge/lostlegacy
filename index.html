@@ -2784,9 +2784,14 @@ async function animateExplorationCenterDrop(value){
 
 async function handleExplorationSelection(value, { keepFront = false, explorerId = null } = {}){
   if (!value) return;
-  if (String(value) === '5'){
+  const normalized = String(value);
+  if (normalized === '5' || normalized === 'kt5'){
     explorationStopRequested = true;
-    await triggerFiveSlideSequence(explorerId);
+    if (normalized === 'kt5'){
+      await triggerKt5FloatSequence(explorerId);
+    } else {
+      await triggerFiveSlideSequence(explorerId);
+    }
     if (state.isHost && !state.gameOver){
       await setGameOverFoundFive(explorerId);
     }
@@ -2800,7 +2805,10 @@ async function handleExplorationSelection(value, { keepFront = false, explorerId
 function playerHandHasFive(playerId){
   if (playerId === null || playerId === undefined) return false;
   const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
-  return cards.some((v) => String(v) === '5');
+  return cards.some((v) => {
+    const normalized = String(v);
+    return normalized === '5' || normalized === 'kt5';
+  });
 }
 
 function playerHandHasX(playerId){
@@ -2844,7 +2852,13 @@ async function runExplorationPhaseSequence(eventId){
       const pid = group.players[0];
       if (playerHandHasFive(pid)){
         await sleep(920);
-        await triggerFiveSlideSequence(pid);
+        const cards = Array.isArray(state.hands?.[pid]?.cards) ? state.hands[pid].cards : [];
+        const hasKt5 = cards.some((v) => String(v) === 'kt5');
+        if (hasKt5){
+          await triggerKt5FloatSequence(pid);
+        } else {
+          await triggerFiveSlideSequence(pid);
+        }
         if (state.isHost && !state.gameOver){
           await setGameOverFoundFive(pid);
         }
