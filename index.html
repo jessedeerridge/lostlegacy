@@ -6412,7 +6412,10 @@ async function playCardFromHand(cardIndex){
   }, { applyLocally:false });
 
   const forcedKtxElimination = await checkAndHandleKtXElimination(myId, { seq: state.turn?.turnSeq });
-  if (forcedKtxElimination) return;
+  if (forcedKtxElimination){
+    await advanceTurnToNextPlayer();
+    return;
+  }
 
   if (usedKey === '2'){
     await resolveEffect2(myId);
@@ -6514,33 +6517,24 @@ async function checkAndHandleKtXElimination(playerId, { seq = null } = {}){
   const ktxCount = played.reduce((n, v) => n + (normalizeCardValue(v) === 'ktx' ? 1 : 0), 0);
   if (ktxCount < 2) return false;
 
-  const slotsNow = getRuinsSlots();
-  const slotIndex = firstEmptyRuinSlotIndex(slotsNow);
-
   const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`);
-  let movedValue = null;
+  let movedValues = [];
   const rem = await runTransaction(cardsRef, (cards) => {
     const arr = Array.isArray(cards) ? [...cards] : [];
-    if (arr.length === 1 && slotIndex !== null){
-      movedValue = String(arr[0] ?? '');
+    if (arr.length >= 1){
+      movedValues = arr.map(v => String(v ?? ''));
       return [];
     }
     return arr;
   }, { applyLocally:false });
 
-  if (rem.committed && movedValue != null && slotIndex !== null){
-    await emitRuinMoveEvent(playerId, movedValue, slotIndex, 'ktxElimination');
-    await sleep(RUIN_MOVE_ANIM_MS);
-
-    const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
-    await runTransaction(ruinsRef, (ruins) => {
-      const src = Array.isArray(ruins) ? [...ruins] : [];
-      const slots = new Array(6).fill(null);
-      for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
-      if (slots[slotIndex]) return slots;
-      slots[slotIndex] = { v: String(movedValue), by: playerId, at: Date.now() };
-      return slots;
-    }, { applyLocally:false });
+  if (rem.committed && movedValues.length){
+    for (const movedValue of movedValues){
+      const slotIndex = await placeCardIntoRuins(playerId, movedValue, { eventMode: 'ktxElimination' });
+      if (slotIndex !== null){
+        await sleep(RUIN_MOVE_ANIM_MS);
+      }
+    }
   }
 
   await eliminatePlayerWithKt1Check(playerId, seq);
