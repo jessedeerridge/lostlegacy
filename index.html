@@ -4099,6 +4099,7 @@ function onKt6PlayedPointerDown(e, cardEl){
   if (!fromPid || fromPid === state.userId || !Number.isFinite(fromIdx) || !Number.isFinite(slotIndex)) return;
 
   startZoomTap(e, cardEl);
+  clearZoomTapState();
 
   setHintRuinSlotHighlight(slotIndex);
 
@@ -4274,7 +4275,7 @@ function onZoomTapEnd(e){
   const moved = zoomTapState.moved;
   clearZoomTapState();
   if (moved) return;
-  if (drag.active || e2drag.active || e6drag.active || e7drag.active || e7pickDrag.active || e8drag.active || kt2drag.active) return;
+  if (drag.active || e2drag.active || e6drag.active || e7drag.active || e7pickDrag.active || e8drag.active || kt2drag.active || kt6drag.active) return;
   openZoomFromCard(target);
 }
 
@@ -6384,7 +6385,12 @@ async function animateMoveFromDeckToRuin(slotIndex, cardValue, { faceUp = false 
   flyer.style.top = `${endY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(3deg) scale(1)';
 
-  await sleep(600);
+  await sleep(560);
+  await waitForRuinCard(slotIndex, 900);
+
+  flyer.style.transition = 'opacity 120ms ease';
+  flyer.style.opacity = '0';
+  await sleep(130);
   flyer.remove();
 }
 
