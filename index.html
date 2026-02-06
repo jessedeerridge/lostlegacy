@@ -4975,10 +4975,10 @@ async function animateKt4ShuffleHands(counts = {}){
     await sleep(240);
 
     const OUT_X = 55;
-    const TILT_MORE = 5;
+    const TILT_MORE = 0;
     const DUR = 220;
     const PAUSE = 20;
-    const loops = Math.min(3, Math.max(1, flyers.length - 1));
+    const loops = 2;
 
     for (let k = 0; k < loops; k++){
       const frontIdx = flyers.length - 1;
@@ -5075,7 +5075,7 @@ async function animateKt2ShuffleToDeck(count = 1){
   await sleep(200);
 
   const OUT_X = 42;
-  const TILT_MORE = 5;
+  const TILT_MORE = 0;
   const DUR = 200;
   const PAUSE = 16;
   const loops = Math.min(2, Math.max(2, flyers.length - 1));
@@ -5686,7 +5686,7 @@ async function animateKt7PairCollectToCenter(slotIndexes = []){
 
   await sleep(20);
   flyers.forEach((flyer, i) => {
-    const tilt = i === 0 ? -16 : 16;
+    const tilt = i === 0 ? 2 : -2;
     flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
     flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(0.96)`;
     flyer.style.left = `${cx + (i === 0 ? -10 : 10)}px`;
@@ -5695,7 +5695,7 @@ async function animateKt7PairCollectToCenter(slotIndexes = []){
 
   await sleep(220);
   flyers.forEach((flyer, i) => {
-    const tilt = i === 0 ? 14 : -14;
+    const tilt = i === 0 ? -2 : 2;
     flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
     flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(1.02)`;
     flyer.style.left = `${cx + (i === 0 ? -5 : 5)}px`;
@@ -5720,7 +5720,7 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
       flyer.className = 'reshuffle-flyer';
       flyer.style.left = `${cx + (i === 0 ? -5 : 5)}px`;
       flyer.style.top = `${cy + 4}px`;
-      flyer.style.transform = `translate(-50%,-50%) rotate(${i === 0 ? 14 : -14}deg) scale(1.02)`;
+      flyer.style.transform = `translate(-50%,-50%) rotate(${i === 0 ? -2 : 2}deg) scale(1.02)`;
       flyer.style.zIndex = String(4300 + i);
       document.body.appendChild(flyer);
       return flyer;
@@ -5730,7 +5730,7 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
   const stackPoints = flyers.map((_, i) => ({
     x: cx + (i * 4),
     y: cy + (i * 4),
-    rot: 5,
+    rot: i === 0 ? 2 : -2,
   }));
 
   flyers.forEach((f, i) => {
@@ -5744,9 +5744,9 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
   await sleep(240);
 
   const OUT_X = 42;
-  const TILT_MORE = 5;
+  const TILT_MORE = 0;
   const DUR = 200;
-  const loops = Math.min(3, Math.max(1, flyers.length - 1));
+  const loops = 2;
 
   for (let k = 0; k < loops; k++){
     const frontIdx = flyers.length - 1;
@@ -5785,15 +5785,10 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
     flyer.style.transition = 'left 620ms ease, top 620ms ease, transform 620ms ease';
     flyer.style.left = `${x}px`;
     flyer.style.top = `${y}px`;
-    flyer.style.transform = `translate(-50%,-50%) rotate(${i === 0 ? 10 : -10}deg) scale(0.88)`;
+    flyer.style.transform = `translate(-50%,-50%) rotate(${i === 0 ? 2 : -2}deg) scale(0.88)`;
   });
 
   await sleep(700);
-  flyers.forEach((flyer) => {
-    flyer.style.transition = 'opacity 150ms ease';
-    flyer.style.opacity = '0';
-  });
-  await sleep(180);
   flyers.forEach((flyer) => flyer.remove());
   kt7PairAnimSession = null;
 }
