@@ -2847,6 +2847,7 @@ let latestPlayers = [];
 let prevIsMyTurn = false;
 let autoDrawInFlight = false;
 let autoSkipInFlight = false;
+let autoKtxInFlight = false;
 let prevTurnSeq = null;
 
 let prevMyCardsSig = null;
@@ -3022,6 +3023,7 @@ function subscribeHands(){
   onValue(handsRef, snap => {
     state.hands = snap.val() || {};
     renderHands();
+    maybeAutoResolveKtxPenalty();
   });
 }
 
@@ -3030,7 +3032,53 @@ function subscribePlayed(){
   onValue(pRef, snap => {
     state.played = snap.val() || {};
     renderHands();
+    maybeAutoResolveKtxPenalty();
   });
+}
+
+async function removeOnlyCardFromHandAtomic(playerId){
+  if (!state.roomCode || !playerId) return null;
+  const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`);
+  let removed = null;
+  const res = await runTransaction(cardsRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    if (arr.length !== 1) return arr;
+    removed = String(arr[0]);
+    return [];
+  }, { applyLocally:false });
+  if (!res.committed) return null;
+  return removed;
+}
+
+async function maybeAutoResolveKtxPenalty(){
+  if (!state.isHost) return;
+  if (!state.roomCode || state.gameOver) return;
+  if (autoKtxInFlight) return;
+
+  const candidates = (state.players || []).filter((p) => {
+    if (!p?.id) return false;
+    if (state.eliminated?.[p.id]) return false;
+    const played = Array.isArray(state.played?.[p.id]) ? state.played[p.id] : [];
+    const ktxCount = played.reduce((n, v) => n + (normalizeCardValue(v) === 'ktx' ? 1 : 0), 0);
+    if (ktxCount < 2) return false;
+    const hand = Array.isArray(state.hands?.[p.id]?.cards) ? state.hands[p.id].cards : [];
+    return hand.length === 1;
+  });
+  if (!candidates.length) return;
+
+  autoKtxInFlight = true;
+  try {
+    for (const p of candidates){
+      const playerId = p.id;
+      const cardValue = await removeOnlyCardFromHandAtomic(playerId);
+      if (cardValue == null) continue;
+
+      await placeCardIntoRuins(playerId, cardValue, { eventMode:'ktx' });
+      await eliminatePlayerWithKt1Check(playerId, state.turn?.turnSeq);
+    }
+  } finally {
+    autoKtxInFlight = false;
+  }
 }
 
 function subscribeDeck(){
@@ -3478,7 +3526,7 @@ function subscribeRuinMoveEvent(){
     const mode = ev.mode || null;
 
     if (!fromPid) return;
-    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8') return;
+    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktx') return;
 
     if (mode === 'oneReveal' || mode === 'kt8'){
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
