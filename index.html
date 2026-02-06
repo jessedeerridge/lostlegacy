@@ -294,6 +294,15 @@
     backface-visibility:hidden;
   }
 
+  .front-flyer.kt6-flyer{
+    width:42px;
+    height:62px;
+    border-width:1px;
+    border-radius:10px;
+    --card-title-size:7.6px;
+    --card-reading-size:6.4px;
+  }
+
   @keyframes explorationReopen{
     0%{ transform:translate(-50%,0) rotate(var(--rot,0deg)) rotateY(0deg); }
     45%{ transform:translate(-50%,0) rotate(calc(var(--rot,0deg) + 90deg)) rotateY(180deg); }
@@ -368,6 +377,12 @@
     45%{ transform:translate(-50%,0) rotate(var(--rot,0deg)) scale(1.44); }
     100%{ transform:translate(-50%,0) rotate(var(--rot,0deg)) scale(1); }
   }
+
+  @keyframes playedPickPulse{
+    0%{ transform:rotate(var(--played-rot,0deg)) scale(1); }
+    45%{ transform:rotate(var(--played-rot,0deg)) scale(1.22); }
+    100%{ transform:rotate(var(--played-rot,0deg)) scale(1); }
+  }
   .mini-card.pickable{
     pointer-events:auto;
     cursor:pointer;
@@ -414,7 +429,7 @@
   .played-card.kt6-pickable{
     cursor:grab;
     touch-action:none;
-    animation: fanPickPulse 760ms ease-in-out infinite;
+    animation: playedPickPulse 760ms ease-in-out infinite;
   }
   .played-card.kt2-pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
@@ -6231,18 +6246,18 @@ async function animateKt6DeckTopMoveToRuin(playerId, cardValue, slotIndex, { sho
   const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
 
   const flyer = document.createElement('div');
-  flyer.className = showFace ? 'front-flyer face-flyer' : 'back-flyer';
+  flyer.className = showFace ? 'front-flyer face-flyer kt6-flyer' : 'back-flyer';
   if (showFace) setCardFace(flyer, cardValue);
   flyer.style.left = `${startX}px`;
   flyer.style.top = `${startY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(-4deg) scale(1.02)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-4deg) scale(1)';
   document.body.appendChild(flyer);
 
   await sleep(0);
   flyer.style.transition = 'left 460ms ease, top 460ms ease, transform 460ms ease';
   flyer.style.left = `${endX}px`;
   flyer.style.top = `${endY}px`;
-  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.86)';
+  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(1)';
   await sleep(500);
 
   if (showFace){
@@ -9372,8 +9387,10 @@ function renderPlayerCircle(players){
 
         if (!parallel){
           c.style.transform = `rotate(${cardRotate + (isUsedKt1 ? 90 : 0)}deg)`;
+          c.style.setProperty('--played-rot', `${cardRotate + (isUsedKt1 ? 90 : 0)}deg`);
         } else {
           c.style.transform = `rotate(${isUsedKt1 ? 90 : 0}deg)`;
+          c.style.setProperty('--played-rot', `${isUsedKt1 ? 90 : 0}deg`);
         }
 
         if (isUsedKt1){
