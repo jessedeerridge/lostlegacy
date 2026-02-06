@@ -866,6 +866,52 @@
     dominant-baseline:middle;
   }
 
+  .kt8-guess-panel{
+    position:fixed;
+    left:50%; top:50%;
+    transform:translate(-50%,-50%);
+    display:flex;
+    gap:8px;
+    padding:10px 12px;
+    border-radius:12px;
+    background:rgba(0,0,0,.82);
+    z-index:950;
+  }
+  .kt8-guess-panel.hidden{ display:none; }
+  .kt8-guess-btn{
+    width:38px; height:38px;
+    border-radius:10px;
+    border:1px solid rgba(255,255,255,.35);
+    color:#fff;
+    background:rgba(255,255,255,.12);
+    font-size:18px;
+    font-weight:800;
+    cursor:pointer;
+  }
+  .kt8-guess-btn:hover{ background:rgba(255,255,255,.25); }
+
+  .mini-card.kt8-targeted{
+    z-index:88;
+    outline:2px solid rgba(59,130,246,.85);
+  }
+  .mini-card.kt8-targeted.kt8-reveal-match{
+    animation: explorationReopen 720ms ease-in-out 1;
+  }
+  .kt8-guess-mark{
+    position:absolute;
+    left:50%;
+    top:-15px;
+    transform:translateX(-50%);
+    color:#fff;
+    font-size:15px;
+    font-weight:900;
+    line-height:1;
+    z-index:95;
+    white-space:nowrap;
+    pointer-events:none;
+    text-shadow:0 2px 6px rgba(0,0,0,.55);
+  }
+
   /* ===== ③/④：見たカード拡大（使用者のみ） ===== */
   .peek-overlay{
     position:fixed; inset:0;
@@ -1453,6 +1499,8 @@
   <button class="btn primary" id="btnConfirmYes">はい</button>
 </div>
 
+<div id="kt8GuessPanel" class="kt8-guess-panel hidden"></div>
+
 <!-- ★全員：✕拡大＋揺れ -->
 <div id="globalXBackdrop" class="global-x-backdrop hidden">
   <div class="global-x-card" id="globalXCard">✕</div>
@@ -1849,6 +1897,8 @@ const ui = {
   effect8Selecting: false,
   effect8Returning: false,
   effect8TargetPlayerId: null,
+  kt8Guessing: false,
+  kt8GuessOptions: [],
 
   kt4ShuffleAnimating: false,
 
@@ -1905,6 +1955,7 @@ const zoomCardEl = document.getElementById('zoomCard');
 const confirmPop = document.getElementById('confirmPop');
 const confirmMsg = document.getElementById('confirmMsg');
 const btnConfirmYes = document.getElementById('btnConfirmYes');
+const kt8GuessPanel = document.getElementById('kt8GuessPanel');
 
 const globalXBackdrop = document.getElementById('globalXBackdrop');
 const globalOneBackdrop = document.getElementById('globalOneBackdrop');
@@ -2017,6 +2068,33 @@ function showConfirmPop(text, onYes){
 function hideConfirmPop(){
   confirmPop.classList.add('hidden');
   ui.confirmAction = null;
+}
+
+function showKt8GuessPanel(options, onPick){
+  if (!kt8GuessPanel) return;
+  kt8GuessPanel.innerHTML = '';
+  (Array.isArray(options) ? options : []).forEach((n) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'kt8-guess-btn';
+    btn.textContent = String(n);
+    btn.addEventListener('click', () => onPick?.(String(n)));
+    kt8GuessPanel.appendChild(btn);
+  });
+  kt8GuessPanel.classList.remove('hidden');
+}
+
+function hideKt8GuessPanel(){
+  if (!kt8GuessPanel) return;
+  kt8GuessPanel.classList.add('hidden');
+  kt8GuessPanel.innerHTML = '';
+}
+
+function clearKt8RevealClasses(){
+  playerCircle.querySelectorAll('.mini-card.kt8-targeted, .mini-card.kt8-reveal-match').forEach((el) => {
+    el.classList.remove('kt8-targeted', 'kt8-reveal-match');
+  });
+  playerCircle.querySelectorAll('.kt8-guess-mark').forEach((el) => el.remove());
 }
 
 function showPeekCard(value){
@@ -3017,15 +3095,45 @@ function subscribeEffect8(){
     state.effect8 = snap.val() || null;
 
     const mine = state.effect8 && state.effect8.playerId === state.userId;
-    const selecting = !!(mine && state.effect8.phase === 'select');
-    const returning = !!(mine && state.effect8.phase === 'return');
+    const phase = state.effect8?.phase || null;
+    const selecting = !!(mine && phase === 'select');
+    const returning = !!(mine && phase === 'return');
+    const guessing = !!(mine && phase === 'guess');
+    const guessedMismatch = !!(mine && phase === 'guessResult' && state.effect8?.guessResult === 'mismatch');
 
     ui.effect8Selecting = selecting;
     ui.effect8Returning = returning;
-    ui.effect8TargetPlayerId = mine ? (state.effect8?.targetPlayerId ?? null) : null;
+    ui.kt8Guessing = guessing;
+    ui.effect8TargetPlayerId = state.effect8?.targetPlayerId ?? null;
+    ui.kt8GuessOptions = Array.isArray(state.effect8?.guessOptions) ? state.effect8.guessOptions : [];
 
     if (!returning && e8drag.active){
       cleanupE8Drag();
+    }
+    if (!guessing){
+      hideKt8GuessPanel();
+    }
+    if (!state.effect8){
+      hideKt8GuessPanel();
+      clearKt8RevealClasses();
+    }
+
+    if (guessing){
+      showKt8GuessPanel(ui.kt8GuessOptions, async (num) => {
+        await handleKt8GuessSelect(num);
+      });
+    }
+
+    if (mine && phase === 'guessResult' && guessedMismatch){
+      const v = state.effect8?.revealed;
+      if (v !== undefined && v !== null) showPeekCard(v);
+      showConfirmPop('閉じてもいいですか', async () => {
+        await finishKt8MismatchAndAdvance();
+      });
+    } else if (!(state.effect3?.playerId === state.userId && state.effect3?.phase === 'confirm')
+      && !(state.effect4?.playerId === state.userId && state.effect4?.phase === 'confirm')){
+      hideConfirmPop();
+      hidePeekCard();
     }
 
     updateTurnUI();
@@ -5346,6 +5454,10 @@ async function playCardFromHand(cardIndex){
     await resolveEffect8(myId);
     return;
   }
+  if (usedKey === 'kt8'){
+    await resolveKt8(myId);
+    return;
+  }
   if (usedKey === '1'){
     await advanceTurnToNextPlayer();
     return;
@@ -6120,7 +6232,8 @@ async function resolveEffect7(playerId){
     phase: 'pickRuins',
     at: Date.now(),
     targetSlotIndex: null,
-    pickedValue: null
+    pickedValue: null,
+    mode: 'normal'
   });
 }
 
@@ -6252,7 +6365,30 @@ async function resolveEffect8(playerId){
     at: Date.now(),
     targetPlayerId: null,
     targetCardIndex: null,
-    pickedValue: null
+    pickedValue: null,
+    mode: 'normal'
+  });
+}
+
+async function resolveKt8(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  await update(turnRef, { paused:true });
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effect8`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'select',
+    at: Date.now(),
+    targetPlayerId: null,
+    targetCardIndex: null,
+    pickedValue: null,
+    mode: 'kt8',
+    guessOptions: ['1','2','3','4','6','7','8'],
   });
 }
 
@@ -6267,6 +6403,27 @@ async function handleEffect8Pick(targetPlayerId, cardIndex){
   if (!cards.length) return;
 
   const idx = Math.max(0, Math.min(cards.length - 1, Number(cardIndex || 0)));
+  const mode = String(ef.mode || 'normal');
+
+  if (mode === 'kt8'){
+    await set(ref(db, `rooms/${state.roomCode}/effect8`), {
+      id: ef.id,
+      playerId: ef.playerId,
+      seq: Number(ef.seq || 0),
+      phase: 'guess',
+      at: Date.now(),
+      targetPlayerId,
+      targetCardIndex: idx,
+      pickedValue: null,
+      mode: 'kt8',
+      guessOptions: ['1','2','3','4','6','7','8'],
+      guessedNumber: null,
+      guessResult: null,
+      revealed: null,
+    });
+    return;
+  }
+
   const revealed = String(cards[idx] ?? '');
 
   if (revealed === '1'){
@@ -6302,10 +6459,61 @@ async function handleEffect8Pick(targetPlayerId, cardIndex){
     at: Date.now(),
     targetPlayerId,
     targetCardIndex: idx,
-    pickedValue: String(removedValue)
+    pickedValue: String(removedValue),
+    mode: 'normal'
   });
 
   updateTurnUI();
+}
+
+async function handleKt8GuessSelect(guessedNumber){
+  if (!state.roomCode) return;
+  const ef = state.effect8;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'guess') return;
+  const targetPlayerId = ef.targetPlayerId;
+  const targetCardIndex = Number(ef.targetCardIndex);
+  if (!targetPlayerId || !Number.isFinite(targetCardIndex)) return;
+
+  const cards = Array.isArray(state.hands?.[targetPlayerId]?.cards) ? state.hands[targetPlayerId].cards : [];
+  if (!cards.length) return;
+  const idx = Math.max(0, Math.min(cards.length - 1, targetCardIndex));
+  const revealed = String(cards[idx] ?? '');
+  const guessed = String(guessedNumber ?? '');
+  const result = (normalizeCardValue(revealed) === guessed) ? 'match' : 'mismatch';
+
+  await set(ref(db, `rooms/${state.roomCode}/effect8`), {
+    id: ef.id,
+    playerId: ef.playerId,
+    seq: Number(ef.seq || 0),
+    phase: 'guessResult',
+    at: Date.now(),
+    targetPlayerId,
+    targetCardIndex: idx,
+    mode: 'kt8',
+    guessedNumber: guessed,
+    guessResult: result,
+    revealed,
+  });
+
+  if (result === 'match'){
+    await sleep(1200);
+    await removeCardFromHandByIndex(targetPlayerId, idx);
+    await placeCardIntoRuins(targetPlayerId, revealed, { eventMode: 'kt8' });
+    await set(ref(db, `rooms/${state.roomCode}/effect8`), null);
+    await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+    await advanceTurnToNextPlayer();
+  }
+}
+
+async function finishKt8MismatchAndAdvance(){
+  if (!state.roomCode) return;
+  const ef = state.effect8;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'guessResult' || ef.guessResult !== 'mismatch') return;
+  hidePeekCard();
+  hideConfirmPop();
+  await set(ref(db, `rooms/${state.roomCode}/effect8`), null);
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
 }
 
 async function handleEffect8Drop(cardIndex){
@@ -6654,13 +6862,14 @@ function renderEffectArrowLayer(players){
       bothEnds: false,
       show: state.userId !== ef4.playerId,
     };
-  } else if (ef8 && ef8.phase === 'return' && ef8.playerId && ef8.targetPlayerId){
+  } else if (ef8 && ef8.playerId && ef8.targetPlayerId && (ef8.phase === 'return' || ef8.phase === 'guess' || ef8.phase === 'guessResult')){
+    const isKt8 = String(ef8.mode || '') === 'kt8';
     config = {
       fromPid: ef8.playerId,
       toPid: ef8.targetPlayerId,
-      targetCardIndex: null,
-      showEye: false,
-      bothEnds: true,
+      targetCardIndex: isKt8 ? ef8.targetCardIndex : null,
+      showEye: isKt8,
+      bothEnds: !isKt8,
       show: true,
     };
   }
@@ -6856,7 +7065,13 @@ function renderPlayerCircle(players){
       const ef4TargetIndex = (state.effect4 && state.effect4.phase === 'confirm' && state.effect4.targetPlayerId === p.id)
         ? Number(state.effect4.targetCardIndex)
         : null;
-      const targetIndex = Number.isFinite(ef3TargetIndex) ? ef3TargetIndex : (Number.isFinite(ef4TargetIndex) ? ef4TargetIndex : null);
+      const ef8IsKt8 = !!(state.effect8 && String(state.effect8.mode || '') === 'kt8');
+      const ef8TargetIndex = (ef8IsKt8 && state.effect8.targetPlayerId === p.id && ['guess','guessResult'].includes(String(state.effect8.phase || '')))
+        ? Number(state.effect8.targetCardIndex)
+        : null;
+      const targetIndex = Number.isFinite(ef3TargetIndex)
+        ? ef3TargetIndex
+        : (Number.isFinite(ef4TargetIndex) ? ef4TargetIndex : (Number.isFinite(ef8TargetIndex) ? ef8TargetIndex : null));
       const minCountForTarget = Number.isFinite(targetIndex) ? Math.min(count, Math.max(1, targetIndex + 1)) : 0;
 
       const visibleCount = Math.min(count, Math.max(0, 6, minCountForTarget));
@@ -6877,6 +7092,23 @@ function renderPlayerCircle(players){
         if (revealedValue != null && handCards[i2] != null && String(revealedValue) === String(handCards[i2])){
           card.classList.add('exploration-front');
           setCardFace(card, handCards[i2]);
+        }
+
+        if (Number.isFinite(ef8TargetIndex) && ef8TargetIndex === i2){
+          card.classList.add('kt8-targeted');
+          if (state.effect8?.phase === 'guessResult'){
+            const mark = document.createElement('div');
+            mark.className = 'kt8-guess-mark';
+            const g = String(state.effect8?.guessedNumber || '');
+            if (state.effect8?.guessResult === 'mismatch'){
+              mark.textContent = g ? `${g} ✕` : '✕';
+            } else {
+              mark.textContent = g;
+              card.classList.add('exploration-front', 'kt8-reveal-match');
+              setCardFace(card, handCards[i2]);
+            }
+            card.appendChild(mark);
+          }
         }
 
         card.addEventListener('pointerdown', (ev) => startZoomTap(ev, card));
