@@ -5720,7 +5720,7 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
       flyer.className = 'reshuffle-flyer';
       flyer.style.left = `${cx + (((i * 11) % 16) - 8)}px`;
       flyer.style.top = `${cy + (((i * 7) % 12) - 6)}px`;
-      flyer.style.transform = `translate(-50%,-50%) rotate(${((i * 13) % 18) - 9}deg) scale(0.9)`;
+      flyer.style.transform = `translate(-50%,-50%) rotate(${((i * 13) % 18) - 9}deg) scale(0.88)`;
       flyer.style.zIndex = String(4300 + i);
       document.body.appendChild(flyer);
       return flyer;
@@ -5738,7 +5738,7 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
     f.style.transition = 'left 180ms ease-in-out, top 180ms ease-in-out, transform 180ms ease-in-out';
     f.style.left = `${p.x}px`;
     f.style.top = `${p.y}px`;
-    f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.86)`;
+    f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.88)`;
     f.style.zIndex = String(4300 + i);
   });
   await sleep(200);
@@ -5760,7 +5760,7 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
     frontCard.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
     frontCard.style.left = `${frontPoint.x + OUT_X}px`;
     frontCard.style.top = `${frontPoint.y}px`;
-    frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.86)`;
+    frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.88)`;
     await sleep(DUR);
 
     const movedPoint = stackPoints.pop();
@@ -5775,7 +5775,7 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
     movedFlyer.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
     movedFlyer.style.left = `${stackPoints[backIdx].x}px`;
     movedFlyer.style.top = `${stackPoints[backIdx].y}px`;
-    movedFlyer.style.transform = `translate(-50%,-50%) rotate(${stackPoints[backIdx].rot}deg) scale(0.86)`;
+    movedFlyer.style.transform = `translate(-50%,-50%) rotate(${stackPoints[backIdx].rot}deg) scale(0.88)`;
     await sleep(DUR);
     await sleep(PAUSE);
   }
