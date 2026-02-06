@@ -6530,6 +6530,8 @@ async function checkAndHandleKtXElimination(playerId, { seq = null } = {}){
     return arr;
   }, { applyLocally:false });
 
+  await eliminatePlayerWithKt1Check(playerId, seq);
+
   if (rem.committed && movedValues.length){
     for (const movedValue of movedValues){
       const slotsNow = getRuinsSlots();
@@ -6558,7 +6560,6 @@ async function checkAndHandleKtXElimination(playerId, { seq = null } = {}){
     }
   }
 
-  await eliminatePlayerWithKt1Check(playerId, seq);
   return true;
 }
 
