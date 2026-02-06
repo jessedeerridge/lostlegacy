@@ -2867,6 +2867,7 @@ let lastOneRevealEventId = null;
 let lastExplorationEventId = null;
 let lastKt4ShuffleEventId = null;
 let lastKt2ShuffleEventId = null;
+let kt2ShuffleAnimationChain = Promise.resolve();
 
 function generateRoomCode(length = 6){
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -3448,12 +3449,15 @@ function subscribeKt2ShuffleEvent(){
     const fromPlayerId = String(ev.fromPlayerId || '');
     const fromPlayedIndex = Number(ev.fromPlayedIndex);
     const byPlayerId = String(ev.byPlayerId || '');
-    if (fromPlayerId && byPlayerId && byPlayerId !== state.userId){
-      animateReturnTopFromPlayedCardToDeck(fromPlayerId, fromPlayedIndex);
-    }
-
     const count = Number(ev.count || 1);
-    animateKt2ShuffleToDeck(count);
+    kt2ShuffleAnimationChain = kt2ShuffleAnimationChain
+      .catch(() => {})
+      .then(async () => {
+        if (fromPlayerId && byPlayerId && byPlayerId !== state.userId){
+          await animateReturnTopFromPlayedCardToDeck(fromPlayerId, fromPlayedIndex);
+        }
+        await animateKt2ShuffleToDeck(count);
+      });
   });
 }
 
