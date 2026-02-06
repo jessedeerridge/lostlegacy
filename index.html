@@ -1614,6 +1614,7 @@ sessionStorage.setItem('bbUserId', savedUserId);
 const DRAW_COMMIT_DELAY_MS = 620;
 const RESHUFFLE_ANIM_MS = 980;
 const RUIN_MOVE_ANIM_MS = 760;
+const KTX_ELIMINATION_TURN_DELAY_MS = 1200;
 const RUIN_TAKE_ANIM_MS = 760;
 const KT7_COLLECT_ANIM_MS = 980;
 const KT7_RETURN_ANIM_MS = 980;
@@ -6412,7 +6413,11 @@ async function playCardFromHand(cardIndex){
   }, { applyLocally:false });
 
   const forcedKtxElimination = await checkAndHandleKtXElimination(myId, { seq: state.turn?.turnSeq });
-  if (forcedKtxElimination) return;
+  if (forcedKtxElimination){
+    await sleep(KTX_ELIMINATION_TURN_DELAY_MS);
+    await advanceTurnToNextPlayer();
+    return;
+  }
 
   if (usedKey === '2'){
     await resolveEffect2(myId);
@@ -6514,36 +6519,47 @@ async function checkAndHandleKtXElimination(playerId, { seq = null } = {}){
   const ktxCount = played.reduce((n, v) => n + (normalizeCardValue(v) === 'ktx' ? 1 : 0), 0);
   if (ktxCount < 2) return false;
 
-  const slotsNow = getRuinsSlots();
-  const slotIndex = firstEmptyRuinSlotIndex(slotsNow);
-
   const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`);
-  let movedValue = null;
+  let movedValues = [];
   const rem = await runTransaction(cardsRef, (cards) => {
     const arr = Array.isArray(cards) ? [...cards] : [];
-    if (arr.length === 1 && slotIndex !== null){
-      movedValue = String(arr[0] ?? '');
+    if (arr.length >= 1){
+      movedValues = arr.map(v => String(v ?? ''));
       return [];
     }
     return arr;
   }, { applyLocally:false });
 
-  if (rem.committed && movedValue != null && slotIndex !== null){
-    await emitRuinMoveEvent(playerId, movedValue, slotIndex, 'ktxElimination');
-    await sleep(RUIN_MOVE_ANIM_MS);
+  await eliminatePlayerWithKt1Check(playerId, seq);
 
-    const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
-    await runTransaction(ruinsRef, (ruins) => {
-      const src = Array.isArray(ruins) ? [...ruins] : [];
-      const slots = new Array(6).fill(null);
-      for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
-      if (slots[slotIndex]) return slots;
-      slots[slotIndex] = { v: String(movedValue), by: playerId, at: Date.now() };
-      return slots;
-    }, { applyLocally:false });
+  if (rem.committed && movedValues.length){
+    for (const movedValue of movedValues){
+      const slotsNow = getRuinsSlots();
+      const slotIndex = firstEmptyRuinSlotIndex(slotsNow);
+      if (slotIndex === null) break;
+
+      await emitRuinMoveEvent(playerId, movedValue, slotIndex, 'ktxElimination');
+      await sleep(RUIN_MOVE_ANIM_MS);
+
+      const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+      await runTransaction(ruinsRef, (ruins) => {
+        const slots = Array.isArray(ruins) ? [...ruins] : [];
+        for (let i=0;i<6;i++){
+          if (slots[i] === undefined) slots[i] = null;
+        }
+
+        let target = slotIndex;
+        if (slots[target]){
+          target = firstEmptyRuinSlotIndex(slots);
+        }
+        if (target === null) return slots;
+
+        slots[target] = { v: String(movedValue), by: playerId, at: Date.now() };
+        return slots;
+      }, { applyLocally:false });
+    }
   }
 
-  await eliminatePlayerWithKt1Check(playerId, seq);
   return true;
 }
 
@@ -6718,8 +6734,9 @@ async function eliminatePlayerWithKt1Check(playerId, seq = null){
   const revived = await tryReviveWithKt1(playerId, seq);
   if (revived) return false;
 
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
+  // タグ表示を先に切り替えて体感遅延を減らす
   state.eliminated = { ...(state.eliminated || {}), [playerId]: true };
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
   return true;
 }
 
