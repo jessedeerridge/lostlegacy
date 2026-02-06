@@ -965,6 +965,37 @@
     }
   }
 
+  @keyframes kt5CenterFloatMotion{
+    0%{
+      transform:translate3d(-50%, -50%, 0) scale(0.72);
+      opacity:0;
+    }
+    18%{
+      transform:translate3d(-50%, -50%, 0) scale(1.08);
+      opacity:1;
+    }
+    35%{
+      transform:translate3d(-50%, calc(-50% - 16px), 0) scale(1.06);
+      opacity:1;
+    }
+    50%{
+      transform:translate3d(-50%, calc(-50% + 14px), 0) scale(1.04);
+      opacity:1;
+    }
+    65%{
+      transform:translate3d(-50%, calc(-50% - 12px), 0) scale(1.05);
+      opacity:1;
+    }
+    82%{
+      transform:translate3d(-50%, calc(-50% + 10px), 0) scale(1.03);
+      opacity:1;
+    }
+    100%{
+      transform:translate3d(-50%, calc(-50% - 2px), 0) scale(0.96);
+      opacity:0;
+    }
+  }
+
   /* ===== 全員：✕拡大 ===== */
   .global-x-backdrop{
     position:fixed; inset:0;
@@ -1467,6 +1498,7 @@ const FIVE_SLIDE_HOLD_MS = 1200;
 const FIVE_SLIDE_OUT_MS = 520;
 const FIVE_SLIDE_TOTAL_MS = FIVE_SLIDE_IN_MS + 120 + FIVE_SLIDE_HOLD_MS + FIVE_SLIDE_OUT_MS;
 const FIVE_ARROW_DELAY_MS = 1200;
+const KT5_FLOAT_TOTAL_MS = FIVE_SLIDE_TOTAL_MS;
 const LAST_SURVIVOR_DELAY_MS = 1200;
 const XRAY_MINI_DELAY_MS = 1200;
 const ONE_REVEAL_DELAY_MS = 1200;
@@ -1883,7 +1915,7 @@ const DECK_SETS = [
   {
     id: 'starship',
     name: '星を渡る船',
-    cards: [1,2,3,4,5,6,6,7,7,7,8,8,8,"✕","✕","✕"],
+    cards: [3,4,5,6,6,7,7,7,8,8,8,"✕","✕","✕"],
     helpRows: [
       [1,2,3,4,5],
       [6,7,8,'x'],
@@ -2573,7 +2605,7 @@ async function runExplorationPhaseSequence(eventId){
       const pid = group.players[0];
       if (playerHandHasFive(pid)){
         await sleep(920);
-        await animateGlobalFiveSlide();
+        await triggerFiveSlideSequence(pid);
         if (state.isHost && !state.gameOver){
           await setGameOverFoundFive(pid);
         }
@@ -2860,7 +2892,7 @@ function subscribeEffect3(){
     // 使用者だけ拡大表示
     if (mine && state.effect3 && state.effect3.phase === 'confirm' && !state.gameOver){
       const v = state.effect3.revealed;
-      if (String(v) === '5'){
+      if (String(v) === '5' || String(v) === 'kt5'){
         hidePeekCard();
         hideConfirmPop();
       } else {
@@ -3174,7 +3206,11 @@ function subscribeFiveSlideEvent(){
     const now = Date.now();
     if (ev.at && (now - ev.at) > 20000) return;
 
-    await animateGlobalFiveSlide();
+    if (String(ev.kind || '5') === 'kt5'){
+      await animateGlobalKt5Float();
+    } else {
+      await animateGlobalFiveSlide();
+    }
   });
 }
 
@@ -4069,10 +4105,14 @@ async function emitReturnTopEvent(fromPlayerId){
   });
 }
 
-async function emitFiveSlideEvent(){
+async function emitFiveSlideEvent(kind = '5'){
   if (!state.roomCode) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  await set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), { id, at: Date.now() });
+  await set(ref(db, `rooms/${state.roomCode}/fiveSlideEvent`), {
+    id,
+    kind: String(kind || '5'),
+    at: Date.now()
+  });
 }
 async function emitXRevealEvent(mode, targetPlayerId, fromPlayerId, targetCardIndex){
   if (!state.roomCode) return;
@@ -4525,6 +4565,7 @@ async function animateMoveFromPlayerToMyHand(fromPlayerId, cardValue){
 
 /* ★全員：5が左→中央へ流れて拡大→右へ流れる（新規書き直し） */
 let fiveSlideInFlight = null;
+let kt5FloatInFlight = null;
 async function animateGlobalFiveSlide(){
   if (fiveSlideInFlight) return fiveSlideInFlight;
   fiveSlideInFlight = new Promise((resolve) => {
@@ -4550,13 +4591,47 @@ async function animateGlobalFiveSlide(){
   return fiveSlideInFlight;
 }
 
+async function animateGlobalKt5Float(){
+  if (kt5FloatInFlight) return kt5FloatInFlight;
+  kt5FloatInFlight = new Promise((resolve) => {
+    document.querySelectorAll('.global-slide-card.kt5-float-anim').forEach((el) => el.remove());
+
+    const card = document.createElement('div');
+    card.className = 'global-slide-card kt5-float-anim';
+    setCardFace(card, 'kt5');
+    card.style.animation = `kt5CenterFloatMotion ${KT5_FLOAT_TOTAL_MS}ms cubic-bezier(.22,.84,.44,1) forwards`;
+    document.body.appendChild(card);
+
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      card.remove();
+      kt5FloatInFlight = null;
+      resolve();
+    };
+    card.addEventListener('animationend', done, { once:true });
+    setTimeout(done, KT5_FLOAT_TOTAL_MS + 200);
+  });
+  return kt5FloatInFlight;
+}
+
 async function triggerFiveSlideSequence(foundByPlayerId){
   if (!state.roomCode) return;
   const shouldEmit = foundByPlayerId ? (state.userId === foundByPlayerId) : state.isHost;
   if (shouldEmit){
-    await emitFiveSlideEvent();
+    await emitFiveSlideEvent('5');
   }
   await sleep(FIVE_SLIDE_TOTAL_MS + 80);
+}
+
+async function triggerKt5FloatSequence(foundByPlayerId){
+  if (!state.roomCode) return;
+  const shouldEmit = foundByPlayerId ? (state.userId === foundByPlayerId) : state.isHost;
+  if (shouldEmit){
+    await emitFiveSlideEvent('kt5');
+  }
+  await sleep(KT5_FLOAT_TOTAL_MS + 80);
 }
 
 /* ★全員：✕拡大→下から中央へ */
@@ -5493,14 +5568,18 @@ async function handleEffect3Pick(targetPlayerId, cardIndex){
     revealed
   });
 
-  // ★見たカードが5なら：通常拡大表示なし → 全員演出 → ゲーム終了（全員停止）
-  if (revealed === '5'){
+  // ★見たカードが5/kt5なら：通常拡大表示なし → 全員演出 → ゲーム終了（全員停止）
+  if (revealed === '5' || revealed === 'kt5'){
     // 使用者側も拡大を出さない
     hidePeekCard();
     hideConfirmPop();
 
     await sleep(FIVE_ARROW_DELAY_MS);
-    await triggerFiveSlideSequence(ef.playerId);
+    if (revealed === 'kt5'){
+      await triggerKt5FloatSequence(ef.playerId);
+    } else {
+      await triggerFiveSlideSequence(ef.playerId);
+    }
     if (!state.gameOver){
       await setGameOverFoundFive(ef.playerId);
     }
