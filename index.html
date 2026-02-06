@@ -4429,42 +4429,57 @@ async function animateKt4ShuffleHands(counts = {}){
     await sleep(380);
 
     const centerPoints = flyers.map((_, i) => ({
-      x: cx + (((i * 5) % 30) - 15),
-      y: cy + (((i * 7) % 24) - 12),
-      rot: (i % 2 ? 18 : -18),
+      x: cx + (i * 4),
+      y: cy + (i * 4),
+      rot: 5,
     }));
 
     flyers.forEach((f, i) => {
       const p = centerPoints[i];
-      f.style.transition = 'left 360ms ease, top 360ms ease, transform 360ms ease';
+      f.style.transition = 'left 220ms ease-in-out, top 220ms ease-in-out, transform 220ms ease-in-out';
       f.style.left = `${p.x}px`;
       f.style.top = `${p.y}px`;
       f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.9)`;
+      f.style.zIndex = String(4000 + i);
     });
-    await sleep(380);
+    await sleep(240);
 
-    const n = flyers.length;
-    const permA = centerPoints.map((_, i) => (i + Math.ceil(n / 2)) % n);
-    flyers.forEach((f, i) => {
-      const p = centerPoints[permA[i]];
-      const rot = centerPoints[i].rot;
-      f.style.transition = 'left 300ms ease-in-out, top 300ms ease-in-out, transform 300ms ease-in-out';
-      f.style.left = `${p.x}px`;
-      f.style.top = `${p.y}px`;
-      f.style.transform = `translate(-50%,-50%) rotate(${rot}deg) scale(0.9)`;
-    });
-    await sleep(320);
+    const OUT_X = 78;
+    const TILT_MORE = 5;
+    const DUR = 220;
+    const PAUSE = 20;
+    const loops = Math.min(3, Math.max(1, flyers.length - 1));
 
-    const permB = centerPoints.map((_, i) => (n - 1 - i));
-    flyers.forEach((f, i) => {
-      const p = centerPoints[permB[i]];
-      const rot = centerPoints[i].rot;
-      f.style.transition = 'left 300ms ease-in-out, top 300ms ease-in-out, transform 300ms ease-in-out';
-      f.style.left = `${p.x}px`;
-      f.style.top = `${p.y}px`;
-      f.style.transform = `translate(-50%,-50%) rotate(${rot}deg) scale(0.9)`;
-    });
-    await sleep(320);
+    for (let k = 0; k < loops; k++){
+      const frontIdx = flyers.length - 1;
+      const backIdx = flyers.length - 2;
+      const frontCard = flyers[frontIdx];
+      const frontPoint = centerPoints[frontIdx];
+      const backPoint = centerPoints[backIdx];
+      if (!frontCard || !frontPoint || !backPoint) break;
+
+      frontCard.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+      frontCard.style.left = `${frontPoint.x + OUT_X}px`;
+      frontCard.style.top = `${frontPoint.y}px`;
+      frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.9)`;
+      await sleep(DUR);
+
+      const moved = centerPoints.pop();
+      centerPoints.splice(backIdx, 0, moved);
+      const movedFlyer = flyers.pop();
+      flyers.splice(backIdx, 0, movedFlyer);
+
+      flyers.forEach((f, i) => {
+        f.style.zIndex = String(4000 + i);
+      });
+
+      movedFlyer.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+      movedFlyer.style.left = `${centerPoints[backIdx].x}px`;
+      movedFlyer.style.top = `${centerPoints[backIdx].y}px`;
+      movedFlyer.style.transform = `translate(-50%,-50%) rotate(${centerPoints[backIdx].rot}deg) scale(0.9)`;
+      await sleep(DUR);
+      await sleep(PAUSE);
+    }
 
     let cursor = 0;
     entries.forEach(({ pid, count }) => {
