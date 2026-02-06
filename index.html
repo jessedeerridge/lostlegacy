@@ -871,6 +871,29 @@
   .ruins-card.pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
   }
+  .ruins-card.effect7-pair-pickable{
+    pointer-events:auto;
+    cursor:pointer;
+    animation: ruinsPulse 760ms ease-in-out infinite;
+  }
+  .ruins-card.effect7-pair-picked{
+    outline:2px solid rgba(56,189,248,.9);
+    box-shadow:0 0 0 2px rgba(255,255,255,.7), 0 14px 24px rgba(14,116,144,.35);
+  }
+  .ruins-card.effect7-inspect-pickable{
+    pointer-events:auto;
+    cursor:pointer;
+    animation: ruinsPulse 760ms ease-in-out infinite;
+  }
+  .ruins-card.effect7-revealed{
+    --ruin-card-scale:1.2;
+    z-index:16;
+    pointer-events:auto;
+    animation:none;
+  }
+  .ruins-card.effect7-ghost-hidden{
+    opacity:0;
+  }
 
   /* 位置：2行×3列（中心＝playerCircle中心＝50%/50%） */
   .ruins-slot[data-i="0"], .ruins-card[data-i="0"]{ left:calc(50% - var(--ru-gap-x)); top:calc(50% - var(--ru-half-y) + var(--ru-shift-y)); }
@@ -1592,6 +1615,8 @@ const DRAW_COMMIT_DELAY_MS = 620;
 const RESHUFFLE_ANIM_MS = 980;
 const RUIN_MOVE_ANIM_MS = 760;
 const RUIN_TAKE_ANIM_MS = 760;
+const KT7_COLLECT_ANIM_MS = 980;
+const KT7_RETURN_ANIM_MS = 980;
 const FIVE_SLIDE_IN_MS = 600;
 const FIVE_SLIDE_HOLD_MS = 1200;
 const FIVE_SLIDE_OUT_MS = 520;
@@ -1917,6 +1942,7 @@ const state = {
   effect8: null,
   effectKt3: null,
   effectKt2: null,
+  effectKt7: null,
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
@@ -1943,6 +1969,11 @@ const ui = {
   effect7Placing: false,
   effect7TargetSlot: null,
   effect7PickedValue: null,
+
+  effectKt7SelectingPair: false,
+  effectKt7SelectedSlots: [],
+  effectKt7Inspecting: false,
+  effectKt7RevealedSlot: null,
 
   effectKt3Selecting: false,
   effectKt3Returning: false,
@@ -2867,6 +2898,9 @@ let lastOneRevealEventId = null;
 let lastExplorationEventId = null;
 let lastKt4ShuffleEventId = null;
 let lastKt2ShuffleEventId = null;
+let lastKt7CollectAnimKey = null;
+let lastKt7ReturnAnimKey = null;
+let kt7PairAnimSession = null;
 let kt2ShuffleAnimationChain = Promise.resolve();
 
 function generateRoomCode(length = 6){
@@ -2946,6 +2980,7 @@ function calcIsPlayable(){
   if (ui.effect6Selecting) return false;
   if (ui.effect7Picking || ui.effect7Placing) return false;
   if (ui.effectKt3Selecting || ui.effectKt3Returning) return false;
+  if (ui.effectKt7SelectingPair || ui.effectKt7Inspecting) return false;
   if (ui.effect8Selecting || ui.effect8Returning) return false;
   if (ui.effectKt2Selecting) return false;
 
@@ -3230,6 +3265,7 @@ function subscribeEffect7(){
     if (mode === 'kt3'){
       state.effectKt3 = raw;
       state.effect7 = null;
+      state.effectKt7 = null;
 
       const phase = raw?.phase || null;
       const selecting = !!(mine && phase === 'selectRuins');
@@ -3245,10 +3281,47 @@ function subscribeEffect7(){
       ui.effect7Placing = false;
       ui.effect7TargetSlot = null;
       ui.effect7PickedValue = null;
+      ui.effectKt7SelectingPair = false;
+      ui.effectKt7SelectedSlots = [];
+      ui.effectKt7Inspecting = false;
+      ui.effectKt7RevealedSlot = null;
       if (e7pickDrag.active) cleanupE7PickDrag({ keepSourceHidden: true });
+    } else if (mode === 'kt7'){
+      state.effectKt7 = raw;
+      state.effect7 = null;
+      state.effectKt3 = null;
+
+      const phase = raw?.phase || null;
+      ui.effectKt7SelectingPair = !!(mine && phase === 'selectPair');
+      ui.effectKt7SelectedSlots = mine && Array.isArray(raw?.selectedSlots) ? raw.selectedSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+      ui.effectKt7Inspecting = !!(mine && phase === 'inspectPick');
+      ui.effectKt7RevealedSlot = Number.isFinite(Number(raw?.revealedSlotIndex)) ? Number(raw.revealedSlotIndex) : null;
+
+      ui.effect7Picking = false;
+      ui.effect7Placing = false;
+      ui.effect7TargetSlot = null;
+      ui.effect7PickedValue = null;
+      ui.effectKt3Selecting = false;
+      ui.effectKt3Returning = false;
+      ui.effectKt3SelectableSlots = [];
+      ui.effectKt3SelectedSlots = [];
+      ui.effectKt3TargetSlot = null;
+
+      runKt7PhaseAnimations(raw);
+
+      if (mine && phase === 'confirm' && !state.gameOver){
+        showConfirmPop('閉じてもいいですか', async () => {
+          await finishKt7AndAdvance();
+        });
+      } else if (!(state.effect3?.playerId === state.userId && state.effect3?.phase === 'confirm')
+        && !(state.effect4?.playerId === state.userId && state.effect4?.phase === 'confirm')
+        && !(state.effect8?.playerId === state.userId && state.effect8?.phase === 'guessResult')){
+        hideConfirmPop();
+      }
     } else {
       state.effect7 = raw;
       state.effectKt3 = null;
+      state.effectKt7 = null;
 
       const picking = !!(mine && raw?.phase === 'pickRuins');
       const placing = !!(mine && raw?.phase === 'placeBack');
@@ -3264,6 +3337,10 @@ function subscribeEffect7(){
       ui.effectKt3SelectableSlots = [];
       ui.effectKt3SelectedSlots = [];
       ui.effectKt3TargetSlot = null;
+      ui.effectKt7SelectingPair = false;
+      ui.effectKt7SelectedSlots = [];
+      ui.effectKt7Inspecting = false;
+      ui.effectKt7RevealedSlot = null;
     }
 
     updateTurnUI();
@@ -4803,6 +4880,12 @@ function getPlayerCardAnchorEl(playerId, cardIndex){
   return playerCircle.querySelector(`.mini-card[data-pid="${playerId}"][data-idx="${cardIndex}"]`);
 }
 
+function getRuinCardAnchorEl(slotIndex){
+  if (!Number.isFinite(Number(slotIndex))) return null;
+  return playerCircle.querySelector(`.ruins-card[data-i="${Number(slotIndex)}"]`)
+    || playerCircle.querySelector(`.ruins-slot[data-i="${Number(slotIndex)}"]`);
+}
+
 function getPlayerCardRect(playerId, cardIndex){
   if (!Number.isFinite(Number(cardIndex))) return null;
   const idx = Number(cardIndex);
@@ -4892,10 +4975,10 @@ async function animateKt4ShuffleHands(counts = {}){
     await sleep(240);
 
     const OUT_X = 55;
-    const TILT_MORE = 5;
+    const TILT_MORE = 0;
     const DUR = 220;
     const PAUSE = 20;
-    const loops = Math.min(3, Math.max(1, flyers.length - 1));
+    const loops = 2;
 
     for (let k = 0; k < loops; k++){
       const frontIdx = flyers.length - 1;
@@ -4992,7 +5075,7 @@ async function animateKt2ShuffleToDeck(count = 1){
   await sleep(200);
 
   const OUT_X = 42;
-  const TILT_MORE = 5;
+  const TILT_MORE = 0;
   const DUR = 200;
   const PAUSE = 16;
   const loops = Math.min(2, Math.max(2, flyers.length - 1));
@@ -5573,6 +5656,165 @@ async function waitForRuinCard(slotIndex, timeoutMs = 600){
 }
 
 /* ★⑦：遺跡→手札（使用者の画面だけ） */
+
+async function animateKt7PairCollectToCenter(slotIndexes = []){
+  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 5).slice(0,2);
+  if (!idxs.length) return;
+
+  const pc = playerCircle.getBoundingClientRect();
+  const cx = pc.left + pc.width/2;
+  const cy = pc.top + pc.height/2 + RUINS_SHIFT_Y;
+
+  if (kt7PairAnimSession?.flyers?.length){
+    kt7PairAnimSession.flyers.forEach((f) => f?.remove?.());
+  }
+
+  const flyers = [];
+  idxs.forEach((slotIndex, i) => {
+    const { x, y } = getRuinSlotCenterByIndex(slotIndex);
+    const flyer = document.createElement('div');
+    flyer.className = 'reshuffle-flyer';
+    flyer.style.left = `${x}px`;
+    flyer.style.top = `${y}px`;
+    flyer.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.88)';
+    flyer.style.zIndex = String(4300 + i);
+    document.body.appendChild(flyer);
+    flyers.push(flyer);
+  });
+
+  kt7PairAnimSession = { flyers, slotIndexes: idxs, cx, cy };
+
+  await sleep(20);
+  flyers.forEach((flyer, i) => {
+    const tilt = i === 0 ? 2 : -2;
+    flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
+    flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(0.96)`;
+    flyer.style.left = `${cx + (i === 0 ? -10 : 10)}px`;
+    flyer.style.top = `${cy - 8}px`;
+  });
+
+  await sleep(220);
+  flyers.forEach((flyer, i) => {
+    const tilt = i === 0 ? -2 : 2;
+    flyer.style.transition = 'transform 200ms ease, left 200ms ease, top 200ms ease';
+    flyer.style.transform = `translate(-50%,-50%) rotate(${tilt}deg) scale(1.02)`;
+    flyer.style.left = `${cx + (i === 0 ? -5 : 5)}px`;
+    flyer.style.top = `${cy + 4}px`;
+  });
+
+  await sleep(220);
+}
+
+async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false){
+  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 5).slice(0,2);
+  if (!idxs.length) return;
+
+  const pc = playerCircle.getBoundingClientRect();
+  const cx = pc.left + pc.width/2;
+  const cy = pc.top + pc.height/2 + RUINS_SHIFT_Y;
+
+  let flyers = Array.isArray(kt7PairAnimSession?.flyers) ? kt7PairAnimSession.flyers.filter(Boolean) : [];
+  if (!flyers.length){
+    flyers = idxs.map((_, i) => {
+      const flyer = document.createElement('div');
+      flyer.className = 'reshuffle-flyer';
+      flyer.style.left = `${cx + (i === 0 ? -5 : 5)}px`;
+      flyer.style.top = `${cy + 4}px`;
+      flyer.style.transform = `translate(-50%,-50%) rotate(${i === 0 ? -2 : 2}deg) scale(1.02)`;
+      flyer.style.zIndex = String(4300 + i);
+      document.body.appendChild(flyer);
+      return flyer;
+    });
+  }
+
+  const stackPoints = flyers.map((_, i) => ({
+    x: cx + (i * 4),
+    y: cy + (i * 4),
+    rot: i === 0 ? 2 : -2,
+  }));
+
+  flyers.forEach((f, i) => {
+    const p = stackPoints[i];
+    f.style.transition = 'left 220ms ease-in-out, top 220ms ease-in-out, transform 220ms ease-in-out';
+    f.style.left = `${p.x}px`;
+    f.style.top = `${p.y}px`;
+    f.style.transform = `translate(-50%,-50%) rotate(${p.rot}deg) scale(0.92)`;
+    f.style.zIndex = String(4300 + i);
+  });
+  await sleep(240);
+
+  const OUT_X = 42;
+  const TILT_MORE = 0;
+  const DUR = 200;
+  const loops = 2;
+
+  for (let k = 0; k < loops; k++){
+    const frontIdx = flyers.length - 1;
+    const backIdx = flyers.length - 2;
+    const frontCard = flyers[frontIdx];
+    const frontPoint = stackPoints[frontIdx];
+    if (!frontCard || !frontPoint || backIdx < 0) break;
+
+    frontCard.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+    frontCard.style.left = `${frontPoint.x + OUT_X}px`;
+    frontCard.style.top = `${frontPoint.y}px`;
+    frontCard.style.transform = `translate(-50%,-50%) rotate(${frontPoint.rot + TILT_MORE}deg) scale(0.92)`;
+    await sleep(DUR);
+
+    const movedPoint = stackPoints.pop();
+    stackPoints.splice(backIdx, 0, movedPoint);
+    const movedFlyer = flyers.pop();
+    flyers.splice(backIdx, 0, movedFlyer);
+
+    flyers.forEach((f, i) => {
+      f.style.zIndex = String(4300 + i);
+    });
+
+    movedFlyer.style.transition = `left ${DUR}ms ease-in-out, top ${DUR}ms ease-in-out, transform ${DUR}ms ease-in-out`;
+    movedFlyer.style.left = `${stackPoints[backIdx].x}px`;
+    movedFlyer.style.top = `${stackPoints[backIdx].y}px`;
+    movedFlyer.style.transform = `translate(-50%,-50%) rotate(${stackPoints[backIdx].rot}deg) scale(0.92)`;
+    await sleep(DUR);
+    await sleep(20);
+  }
+
+  const order = swapped && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
+  flyers.forEach((flyer, i) => {
+    const slotIndex = order[i] ?? order[0];
+    const { x, y } = getRuinSlotCenterByIndex(slotIndex);
+    flyer.style.transition = 'left 620ms ease, top 620ms ease, transform 620ms ease';
+    flyer.style.left = `${x}px`;
+    flyer.style.top = `${y}px`;
+    flyer.style.transform = `translate(-50%,-50%) rotate(${i === 0 ? 2 : -2}deg) scale(0.88)`;
+  });
+
+  await sleep(700);
+  flyers.forEach((flyer) => flyer.remove());
+  kt7PairAnimSession = null;
+}
+
+function runKt7PhaseAnimations(raw){
+  const id = String(raw?.id || '');
+  const phase = String(raw?.phase || '');
+  if (!id || !phase) return;
+
+  if (phase === 'collectingPair'){
+    const key = `${id}:${raw?.at || ''}:collect`;
+    if (key !== lastKt7CollectAnimKey){
+      lastKt7CollectAnimKey = key;
+      animateKt7PairCollectToCenter(raw?.selectedSlots || []);
+    }
+  }
+
+  if (phase === 'returningPair'){
+    const key = `${id}:${raw?.at || ''}:return`;
+    if (key !== lastKt7ReturnAnimKey){
+      lastKt7ReturnAnimKey = key;
+      animateKt7PairReturnFromCenter(raw?.selectedSlots || [], !!raw?.swapped);
+    }
+  }
+}
+
 async function animateTakeFromRuinToMyHand(slotIndex, cardValue){
   const { x:startX, y:startY } = getRuinSlotCenterByIndex(slotIndex);
 
@@ -5937,6 +6179,10 @@ async function playCardFromHand(cardIndex){
   }
   if (usedKey === 'kt3'){
     await resolveKt3(myId);
+    return;
+  }
+  if (usedKey === 'kt7'){
+    await resolveKt7(myId);
     return;
   }
   if (usedKey === '8'){
@@ -6846,6 +7092,162 @@ async function resolveEffect7(playerId){
   });
 }
 
+
+async function resolveKt7(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  const slots = getRuinsSlots();
+  const filled = [];
+  for (let i=0;i<6;i++) if (slots[i]) filled.push(i);
+  if (filled.length < 2){
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await update(turnRef, { paused:true });
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    mode: 'kt7',
+    phase: 'selectPair',
+    at: Date.now(),
+    selectableSlots: filled,
+    selectedSlots: [],
+    hintSlots: [],
+    swapped: false,
+    revealedSlotIndex: null,
+    revealedValue: null,
+  });
+}
+
+async function handleKt7Select(slotIndex){
+  if (!state.roomCode) return;
+
+  const ef = state.effectKt7;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'selectPair') return;
+
+  const idx = Number(slotIndex);
+  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+
+  const selectable = Array.isArray(ef.selectableSlots) ? ef.selectableSlots.map(Number) : [];
+  if (!selectable.includes(idx)) return;
+
+  const selected = Array.isArray(ef.selectedSlots) ? ef.selectedSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  if (selected.includes(idx)) return;
+
+  const nextSelected = selected.concat(idx).slice(0,2);
+  if (nextSelected.length < 2){
+    await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+      ...ef,
+      phase: 'selectPair',
+      at: Date.now(),
+      selectedSlots: nextSelected,
+      hintSlots: nextSelected,
+    });
+    return;
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    ...ef,
+    phase: 'collectingPair',
+    at: Date.now(),
+    selectedSlots: nextSelected,
+    hintSlots: nextSelected,
+  });
+
+  await sleep(KT7_COLLECT_ANIM_MS);
+
+  const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+  const shouldSwap = Math.random() < 0.5;
+
+  await runTransaction(ruinsRef, (ruins) => {
+    const src = Array.isArray(ruins) ? [...ruins] : [];
+    const slots = new Array(6).fill(null);
+    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+
+    const [a,b] = nextSelected;
+    if (!slots[a] || !slots[b]) return slots;
+    if (shouldSwap){
+      const tmp = slots[a];
+      slots[a] = slots[b];
+      slots[b] = tmp;
+    }
+    return slots;
+  }, { applyLocally:false });
+
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    ...ef,
+    mode: 'kt7',
+    phase: 'returningPair',
+    at: Date.now(),
+    selectedSlots: nextSelected,
+    hintSlots: nextSelected,
+    swapped: shouldSwap,
+  });
+
+  await sleep(KT7_RETURN_ANIM_MS);
+
+  const ruinsSnap = await get(ruinsRef);
+  const currentRaw = ruinsSnap.val();
+  const currentSlots = Array.isArray(currentRaw) ? currentRaw : [];
+  const inspectSlots = [];
+  for (let i=0;i<6;i++) if (currentSlots[i]) inspectSlots.push(i);
+
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    ...ef,
+    mode: 'kt7',
+    phase: 'inspectPick',
+    at: Date.now(),
+    selectableSlots: inspectSlots,
+    selectedSlots: nextSelected,
+    hintSlots: [],
+    swapped: shouldSwap,
+    revealedSlotIndex: null,
+    revealedValue: null,
+  });
+}
+
+async function handleKt7Inspect(slotIndex){
+  if (!state.roomCode) return;
+
+  const ef = state.effectKt7;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'inspectPick') return;
+
+  const idx = Number(slotIndex);
+  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+
+  const selectable = Array.isArray(ef.selectableSlots) ? ef.selectableSlots.map(Number) : [];
+  if (!selectable.includes(idx)) return;
+
+  const slot = getRuinsSlots()[idx];
+  if (!slot) return;
+
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), {
+    ...ef,
+    phase: 'confirm',
+    at: Date.now(),
+    revealedSlotIndex: idx,
+    revealedValue: String(slot?.v ?? slot ?? ''),
+  });
+}
+
+async function finishKt7AndAdvance(){
+  if (!state.roomCode) return;
+  if (state.gameOver) return;
+
+  const ef = state.effectKt7;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'confirm') return;
+
+  await set(ref(db, `rooms/${state.roomCode}/effect7`), null);
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
+}
+
 async function resolveKt3(playerId){
   if (!state.roomCode) return;
   const seq = state.turn.turnSeq;
@@ -7077,6 +7479,11 @@ async function handleEffect7Drop(cardIndex){
   ui.effectKt3SelectedSlots = [];
   ui.effectKt3TargetSlot = null;
   state.effectKt3 = null;
+  state.effectKt7 = null;
+  ui.effectKt7SelectingPair = false;
+  ui.effectKt7SelectedSlots = [];
+  ui.effectKt7Inspecting = false;
+  ui.effectKt7RevealedSlot = null;
   updateTurnUI();
   renderMyHand();
 
@@ -7558,16 +7965,24 @@ function renderRuinsArea(){
   const mineKt3Selecting = !!(ui.effectKt3Selecting && state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'selectRuins');
   const mineKt3Picking   = !!(state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'pickRuins');
   const mineKt3Placing   = !!(ui.effectKt3Returning && state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'placeBack');
+  const efKt7 = state.effectKt7;
+  const kt7Mine = !!(efKt7 && efKt7.playerId === state.userId);
+  const kt7Phase = String(efKt7?.phase || '');
+  const mineKt7Selecting = !!(kt7Mine && kt7Phase === 'selectPair');
+  const mineKt7Inspecting = !!(kt7Mine && kt7Phase === 'inspectPick');
 
-  if (mine6Selecting || mine7Picking || mine7Placing || mineKt3Picking || mineKt3Placing) wrap.classList.add('drop-enabled');
+  if (mine6Selecting || mine7Picking || mine7Placing || mineKt3Picking || mineKt3Placing || mineKt7Selecting || mineKt7Inspecting) wrap.classList.add('drop-enabled');
 
   const slots = getRuinsSlots();
+  const kt7HintSlots = Array.isArray(efKt7?.hintSlots) ? efKt7.hintSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  const kt7SelectedSlots = Array.isArray(efKt7?.selectedSlots) ? efKt7.selectedSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  const kt7SelectableSlots = Array.isArray(efKt7?.selectableSlots) ? efKt7.selectableSlots.map(Number).filter(n => Number.isFinite(n)) : [];
 
   for (let i=0;i<6;i++){
     const slot = document.createElement('div');
     slot.className = 'ruins-slot';
     slot.dataset.i = String(i);
-    if ((mine7Placing && Number(ui.effect7TargetSlot) === i) || (mineKt3Placing && Number(ui.effectKt3TargetSlot) === i)) slot.classList.add('hint-target');
+    if ((mine7Placing && Number(ui.effect7TargetSlot) === i) || (mineKt3Placing && Number(ui.effectKt3TargetSlot) === i) || kt7HintSlots.includes(i)) slot.classList.add('hint-target');
     wrap.appendChild(slot);
   }
 
@@ -7620,6 +8035,30 @@ function renderRuinsArea(){
       }
     }
 
+    if (mineKt7Selecting && kt7SelectableSlots.includes(i)){
+      card.classList.add('effect7-pair-pickable');
+      card.addEventListener('click', () => handleKt7Select(i));
+    }
+    if ((mineKt7Selecting || kt7Phase === 'collectingPair' || kt7Phase === 'returningPair') && kt7SelectedSlots.includes(i)){
+      card.classList.add('effect7-pair-picked');
+    }
+    if ((kt7Phase === 'collectingPair' || kt7Phase === 'returningPair') && kt7SelectedSlots.includes(i)){
+      card.classList.add('effect7-ghost-hidden');
+    }
+
+    if (mineKt7Inspecting && kt7SelectableSlots.includes(i)){
+      card.classList.add('effect7-inspect-pickable');
+      card.addEventListener('click', () => handleKt7Inspect(i));
+    }
+
+    if (kt7Phase === 'confirm' && Number(efKt7?.revealedSlotIndex) === i){
+      card.classList.add('effect7-revealed');
+      if (kt7Mine){
+        card.classList.add('exploration-front');
+        setCardFace(card, efKt7?.revealedValue ?? item?.v ?? item);
+      }
+    }
+
     wrap.appendChild(card);
   }
 
@@ -7631,6 +8070,7 @@ function renderEffectArrowLayer(players){
   const ef3 = state.effect3;
   const ef4 = state.effect4;
   const ef8 = state.effect8;
+  const efKt7 = state.effectKt7;
 
   let config = null;
 
@@ -7653,6 +8093,16 @@ function renderEffectArrowLayer(players){
       showEye: true,
       bothEnds: false,
       show: state.userId !== ef4.playerId,
+    };
+  } else if (efKt7 && String(efKt7.mode || '') === 'kt7' && efKt7.phase === 'confirm' && efKt7.playerId && Number.isFinite(Number(efKt7.revealedSlotIndex))){
+    config = {
+      fromPid: efKt7.playerId,
+      toPid: null,
+      toRuinSlotIndex: Number(efKt7.revealedSlotIndex),
+      targetCardIndex: null,
+      showEye: true,
+      bothEnds: false,
+      show: state.userId !== efKt7.playerId,
     };
   } else if (ef8 && ef8.playerId && ef8.targetPlayerId && (ef8.phase === 'return' || ef8.phase === 'guess' || ef8.phase === 'guessResult')){
     const isKt8 = String(ef8.mode || '') === 'kt8';
@@ -7735,9 +8185,11 @@ function renderEffectArrowLayer(players){
 
   requestAnimationFrame(() => {
     const fromEl = getPlayerAnchorEl(config.fromPid);
-    const toEl = config.showEye
-      ? (getPlayerCardAnchorEl(config.toPid, config.targetCardIndex) || getPlayerAnchorEl(config.toPid))
-      : getPlayerAnchorEl(config.toPid);
+    const toEl = Number.isFinite(Number(config.toRuinSlotIndex))
+      ? getRuinCardAnchorEl(config.toRuinSlotIndex)
+      : (config.showEye
+        ? (getPlayerCardAnchorEl(config.toPid, config.targetCardIndex) || getPlayerAnchorEl(config.toPid))
+        : getPlayerAnchorEl(config.toPid));
     if (!fromEl || !toEl) return;
 
     const fr = fromEl.getBoundingClientRect();
