@@ -398,6 +398,10 @@
     --card-title-size:8px;
     --card-reading-size:6px;
   }
+  .played-card.kt1-used{
+    outline:2px solid rgba(234,179,8,.95);
+    outline-offset:1px;
+  }
 
   .card-face{
     position:absolute;
@@ -1812,6 +1816,7 @@ const state = {
   effect8: null,
 
   eliminated: {},     // ★脱落者
+  kt1Revived: {},     // ★kt1復帰済み
   gameOver: null,     // ★ゲーム終了
 
   turn: { currentPlayerId:null, turnSeq:0, drawn:false, paused:false },
@@ -2842,6 +2847,14 @@ function subscribeEliminated(){
     state.eliminated = snap.val() || {};
     updateTurnUI();
     scheduleLastSurvivorCheck();
+  });
+}
+
+function subscribeKt1Revived(){
+  const kRef = ref(db, `rooms/${state.roomCode}/kt1Revived`);
+  onValue(kRef, snap => {
+    state.kt1Revived = snap.val() || {};
+    renderHands();
   });
 }
 
@@ -6162,6 +6175,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeRuins();
 
   subscribeEliminated();
+  subscribeKt1Revived();
   subscribeGameOver();
 
   subscribeEffect2();
@@ -6673,7 +6687,19 @@ function renderPlayerCircle(players){
       const cardRotate = toCenterDeg + 90;
 
       const MAX_SHOW = 10;
-      const slice = playedArr.slice(Math.max(0, playedArr.length - MAX_SHOW));
+      const sliceStart = Math.max(0, playedArr.length - MAX_SHOW);
+      const slice = playedArr.slice(sliceStart);
+
+      const kt1Used = !!state.kt1Revived?.[p.id];
+      let usedKt1Index = -1;
+      if (kt1Used){
+        for (let i = playedArr.length - 1; i >= 0; i--){
+          if (String(playedArr[i]) === 'kt1'){
+            usedKt1Index = i;
+            break;
+          }
+        }
+      }
 
       const parallel = (p.id !== state.userId) && (slice.length === 2 || slice.length === 3 || slice.length === 4);
 
@@ -6685,15 +6711,22 @@ function renderPlayerCircle(players){
           `translate(-50%,-50%) translate(${ox}px, ${oy}px)`;
       }
 
-      slice.forEach(v => {
+      slice.forEach((v, localIndex) => {
         const c = document.createElement('div');
         c.className = 'played-card';
         setCardFace(c, v);
 
+        const absIndex = sliceStart + localIndex;
+        const isUsedKt1 = (absIndex === usedKt1Index) && (String(v) === 'kt1');
+
         if (!parallel){
-          c.style.transform = `rotate(${cardRotate}deg)`;
+          c.style.transform = `rotate(${cardRotate + (isUsedKt1 ? 90 : 0)}deg)`;
         } else {
-          c.style.transform = `rotate(0deg)`;
+          c.style.transform = `rotate(${isUsedKt1 ? 90 : 0}deg)`;
+        }
+
+        if (isUsedKt1){
+          c.classList.add('kt1-used');
         }
 
         c.addEventListener('pointerdown', (ev) => startZoomTap(ev, c));
