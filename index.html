@@ -5904,6 +5904,12 @@ async function playCardFromHand(cardIndex){
     return a;
   }, { applyLocally:false });
 
+  const triggeredKtxDropElimination = await resolveKtxDoubleDiscardElimination(myId, state.turn?.turnSeq);
+  if (triggeredKtxDropElimination){
+    await advanceTurnToNextPlayer();
+    return true;
+  }
+
   if (usedKey === '2'){
     await resolveEffect2(myId);
     return;
@@ -5973,6 +5979,30 @@ async function removeCardFromHandByIndex(playerId, cardIndex){
 
   if (!res.committed) return null;
   return removedValue;
+}
+
+async function resolveKtxDoubleDiscardElimination(playerId, seq = null){
+  if (!state.roomCode || !playerId) return false;
+
+  const playedSnap = await get(ref(db, `rooms/${state.roomCode}/played/${playerId}`));
+  const played = Array.isArray(playedSnap.val()) ? playedSnap.val() : [];
+  const ktxCount = played.reduce((n, v) => n + (normalizeCardValue(v) === 'ktx' ? 1 : 0), 0);
+  if (ktxCount < 2) return false;
+
+  const handRef = ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`);
+  let removedCard = null;
+  const handRes = await runTransaction(handRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    if (arr.length !== 1) return arr;
+    removedCard = String(arr[0]);
+    return [];
+  }, { applyLocally:false });
+  if (!handRes.committed || removedCard == null) return false;
+
+  await placeCardIntoRuins(playerId, removedCard);
+  await sleep(RUIN_MOVE_ANIM_MS);
+  await eliminatePlayerWithKt1Check(playerId, seq);
+  return true;
 }
 
 async function addCardToPlayed(playerId, cardValue){
