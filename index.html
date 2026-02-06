@@ -3478,7 +3478,7 @@ function subscribeRuinMoveEvent(){
     const mode = ev.mode || null;
 
     if (!fromPid) return;
-    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8') return;
+    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxAuto') return;
 
     if (mode === 'oneReveal' || mode === 'kt8'){
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
@@ -3486,6 +3486,10 @@ function subscribeRuinMoveEvent(){
         setOneRevealTargetCard(fromPid, pendingOneRevealTarget.cardIndex, false);
         pendingOneRevealTarget = null;
       }
+      return;
+    }
+    if (mode === 'ktxAuto' && fromPid === state.userId){
+      animateKtxAutoFromMyHandToRuin(slotIndex);
       return;
     }
     if (mode === 'xReveal'){
@@ -5652,6 +5656,48 @@ async function animateTakeFromRuinToPlayerAnchor(playerId, slotIndex, cardValue)
   flyer.remove();
 }
 
+async function animateKtxAutoFromMyHandToRuin(slotIndex){
+  const sourceCard = myHandEl?.querySelector('.my-card[data-index="0"]') || myHandEl?.querySelector('.my-card:last-child');
+  if (!sourceCard){
+    await animateMoveFromPlayerToRuin(state.userId, 'back', slotIndex);
+    return;
+  }
+
+  const sr = sourceCard.getBoundingClientRect();
+  const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
+
+  sourceCard.style.position = 'fixed';
+  sourceCard.style.left = `${sr.left + sr.width/2}px`;
+  sourceCard.style.top = `${sr.top + sr.height/2}px`;
+  sourceCard.style.width = `${sr.width}px`;
+  sourceCard.style.height = `${sr.height}px`;
+  sourceCard.style.margin = '0';
+  sourceCard.style.zIndex = '9998';
+  sourceCard.style.pointerEvents = 'none';
+  sourceCard.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1)';
+  document.body.appendChild(sourceCard);
+
+  await sleep(0);
+  sourceCard.style.transition = 'transform 120ms ease, top 120ms ease';
+  sourceCard.style.top = `${sr.top + sr.height/2 - 18}px`;
+  sourceCard.style.transform = 'translate(-50%,-50%) rotate(-14deg) scale(1.03)';
+  await sleep(130);
+
+  sourceCard.style.transition = 'left 420ms ease, top 420ms ease, transform 420ms ease';
+  sourceCard.style.left = `${endX}px`;
+  sourceCard.style.top = `${endY}px`;
+  sourceCard.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.82)';
+  await sleep(440);
+
+  await waitForRuinCard(slotIndex);
+
+  sourceCard.style.transition = 'opacity 140ms ease, transform 140ms ease';
+  sourceCard.style.opacity = '0';
+  sourceCard.style.transform = 'translate(-50%,-50%) rotate(0deg) scale(0.78)';
+  await sleep(160);
+  sourceCard.remove();
+}
+
 async function animateMoveFromPlayerToRuin(playerId, cardValue, slotIndex){
   const anchor = getPlayerAnchorEl(playerId);
   let startX, startY;
@@ -5904,6 +5950,12 @@ async function playCardFromHand(cardIndex){
     return a;
   }, { applyLocally:false });
 
+  const triggeredKtxDropElimination = await resolveKtxDoubleDiscardElimination(myId, state.turn?.turnSeq);
+  if (triggeredKtxDropElimination){
+    await advanceTurnToNextPlayer();
+    return true;
+  }
+
   if (usedKey === '2'){
     await resolveEffect2(myId);
     return;
@@ -5973,6 +6025,30 @@ async function removeCardFromHandByIndex(playerId, cardIndex){
 
   if (!res.committed) return null;
   return removedValue;
+}
+
+async function resolveKtxDoubleDiscardElimination(playerId, seq = null){
+  if (!state.roomCode || !playerId) return false;
+
+  const playedSnap = await get(ref(db, `rooms/${state.roomCode}/played/${playerId}`));
+  const played = Array.isArray(playedSnap.val()) ? playedSnap.val() : [];
+  const ktxCount = played.reduce((n, v) => n + (normalizeCardValue(v) === 'ktx' ? 1 : 0), 0);
+  if (ktxCount < 2) return false;
+
+  const handRef = ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`);
+  let removedCard = null;
+  const handRes = await runTransaction(handRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    if (arr.length !== 1) return arr;
+    removedCard = String(arr[0]);
+    return [];
+  }, { applyLocally:false });
+  if (!handRes.committed || removedCard == null) return false;
+
+  await placeCardIntoRuins(playerId, removedCard, { eventMode:'ktxAuto' });
+  await sleep(RUIN_MOVE_ANIM_MS);
+  await eliminatePlayerWithKt1Check(playerId, seq);
+  return true;
 }
 
 async function addCardToPlayed(playerId, cardValue){
