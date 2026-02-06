@@ -757,6 +757,12 @@
     width:calc(66px * 1.2);
     aspect-ratio:var(--card-aspect);
     height:auto;
+    cursor:pointer;
+    transition:opacity .2s ease, filter .2s ease;
+  }
+  .help-card.is-disabled{
+    opacity:.35;
+    filter:grayscale(1);
   }
 
   /* 遺跡エリア（2x3）：画面中心(=playerCircle中心)に固定。center-areaを動かしてもここは動かさない */
@@ -1574,6 +1580,7 @@ const CARD_META = {
   "6": { name: "古地図", reading: "ふるちず" },
   "7": { name: "調査", reading: "ちょうさ" },
   "8": { name: "襲撃", reading: "しゅうげき" },
+  "9": { name: "星詠み", reading: "ほしよみ" },
   "x": { name: "待ち伏せ", reading: "ま\u3000ぶ" },
   // 空中庭園用のカードメタデータ
   "kt1": { name: "聖女", reading: "せいじょ" },
@@ -1584,6 +1591,7 @@ const CARD_META = {
   "kt6": { name: "偽情報", reading: "ぎじょうほう" },
   "kt7": { name: "語り部", reading: "かたりべ" },
   "kt8": { name: "呪い", reading: "のろい" },
+  "kt9": { name: "天文台", reading: "てんもんだい" },
   "ktx": { name: "負傷", reading: "ふしょう" },
 };
 
@@ -1645,6 +1653,9 @@ function getCardEffectText(value){
       return '遺跡のカード2枚を選んでよく混ぜる。その後、遺跡のカード1枚を選んで見る。';
     case 'kt8':
       return '5と✕以外の数字を宣言して誰かのカードを見る。当たっているならそのカードを遺跡に置く。そのプレイヤーを脱落させる。';
+    case '9':
+    case 'kt9':
+      return '';
     case 'ktx':
       return '捨て札にこのカードが2枚あれば、手札を遺跡に置いて、脱落する。';
     default:
@@ -1660,9 +1671,11 @@ function getCardDecorCount(value){
       return 2;
     case '7':
     case '8':
+    case '9':
     case 'x':
     case 'kt7':
     case 'kt8':
+    case 'kt9':
     case 'ktx':
       return 3;
     case '1':
@@ -1988,23 +2001,62 @@ const DECK_SETS = [
   {
     id: 'starship',
     name: '星を渡る船',
-    cards: [1,3,4,5,"✕","✕","✕","✕"],
+    cardPool: {
+      '1': 1,
+      '2': 1,
+      '3': 1,
+      '4': 1,
+      '5': 1,
+      '6': 2,
+      '7': 3,
+      '8': 3,
+      '9': 3,
+    },
     helpRows: [
       [1,2,3,4,5],
-      [6,7,8,'x'],
+      [6,7,8,9],
     ],
   },
   {
     id: 'skygarden',
     name: '空中庭園',
-    cards: ["kt8","kt8","kt8","kt8"],
+    cardPool: {
+      'kt1': 1,
+      'kt2': 1,
+      'kt3': 1,
+      'kt4': 1,
+      'kt5': 1,
+      'kt6': 2,
+      'kt7': 3,
+      'kt8': 3,
+      'kt9': 3,
+    },
     helpRows: [
       ["kt1","kt2","kt3","kt4","kt5"],
-      ["kt6","kt7","kt8","ktx"],
+      ["kt6","kt7","kt8","kt9"],
     ],
   },
 ];
 const deckSetState = Object.fromEntries(DECK_SETS.map((set) => [set.id, true]));
+const deckCardState = Object.fromEntries(
+  DECK_SETS.flatMap((set) => Object.keys(set.cardPool).map((cardKey) => [cardKey, true]))
+);
+
+function syncExclusiveFives(preferred = 'starship'){
+  if (preferred === 'starship' && deckCardState['5']){
+    deckCardState['kt5'] = false;
+    return;
+  }
+  if (preferred === 'skygarden' && deckCardState['kt5']){
+    deckCardState['5'] = false;
+    return;
+  }
+  if (deckCardState['5'] && deckCardState['kt5']){
+    deckCardState['kt5'] = false;
+  }
+}
+
+syncExclusiveFives('starship');
 
 function renderHelpList(){
   helpBody.innerHTML = '';
@@ -2038,6 +2090,15 @@ function renderHelpList(){
         const card = document.createElement('div');
         card.className = 'my-card help-card';
         setCardFace(card, value);
+        const isCardEnabled = !!deckCardState[String(value)];
+        card.classList.toggle('is-disabled', !isCardEnabled);
+        card.addEventListener('click', () => {
+          const key = String(value);
+          deckCardState[key] = !deckCardState[key];
+          if (key === '5' && deckCardState[key]) syncExclusiveFives('starship');
+          if (key === 'kt5' && deckCardState[key]) syncExclusiveFives('skygarden');
+          renderHelpList();
+        });
         row.appendChild(card);
       });
       grid.appendChild(row);
@@ -2046,9 +2107,15 @@ function renderHelpList(){
     toggle.addEventListener('click', () => {
       deckSetState[set.id] = !deckSetState[set.id];
       const isEnabled = deckSetState[set.id];
+      Object.keys(set.cardPool).forEach((cardKey) => {
+        deckCardState[cardKey] = isEnabled;
+      });
+      if (set.id === 'starship' && isEnabled) syncExclusiveFives('starship');
+      if (set.id === 'skygarden' && isEnabled && deckSetState.starship) syncExclusiveFives('starship');
       toggle.setAttribute('aria-pressed', isEnabled ? 'true' : 'false');
       toggle.classList.toggle('is-disabled', !isEnabled);
       grid.classList.toggle('is-disabled', !isEnabled);
+      renderHelpList();
     });
 
     section.appendChild(grid);
@@ -6420,7 +6487,7 @@ async function resolveKt8(playerId){
     targetCardIndex: null,
     pickedValue: null,
     mode: 'kt8',
-    guessOptions: ['1','2','3','4','6','7','8'],
+    guessOptions: ['1','2','3','4','6','7','8','9'],
   });
 }
 
@@ -6448,7 +6515,7 @@ async function handleEffect8Pick(targetPlayerId, cardIndex){
       targetCardIndex: idx,
       pickedValue: null,
       mode: 'kt8',
-      guessOptions: ['1','2','3','4','6','7','8'],
+      guessOptions: ['1','2','3','4','6','7','8','9'],
       guessedNumber: null,
       guessResult: null,
       revealed: null,
@@ -7290,7 +7357,13 @@ function renderPlayerCircle(players){
 /* ==== 以降：配布/ホストUI等 ==== */
 
 function buildDeckForPlayers(playerCount){
-  return DECK_SETS.flatMap((set) => (deckSetState[set.id] ? set.cards : []));
+  return DECK_SETS.flatMap((set) => {
+    if (!deckSetState[set.id]) return [];
+    return Object.entries(set.cardPool).flatMap(([cardKey, count]) => {
+      if (!deckCardState[cardKey]) return [];
+      return new Array(Number(count) || 0).fill(cardKey);
+    });
+  });
 }
 
 function toDisplayValue(v){ return String(v); }
