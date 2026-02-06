@@ -411,7 +411,16 @@
     touch-action:none;
     animation: fanPickPulse 760ms ease-in-out infinite;
   }
+  .played-card.kt6-pickable{
+    cursor:grab;
+    touch-action:none;
+    animation: fanPickPulse 760ms ease-in-out infinite;
+  }
   .played-card.kt2-pickable:hover{
+    outline:2px solid rgba(37,99,235,.55);
+    outline-offset:1px;
+  }
+  .played-card.kt6-pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
     outline-offset:1px;
   }
@@ -1560,6 +1569,7 @@
 <div id="confirmPop" class="confirm-pop hidden">
   <div class="msg" id="confirmMsg">閉じてもいいですか</div>
   <div class="spacer"></div>
+  <button class="btn hidden" id="btnConfirmNo">いいえ</button>
   <button class="btn primary" id="btnConfirmYes">はい</button>
 </div>
 
@@ -1617,6 +1627,7 @@ const KTX_ELIMINATION_TURN_DELAY_MS = 1200;
 const RUIN_TAKE_ANIM_MS = 760;
 const KT7_COLLECT_ANIM_MS = 980;
 const KT7_RETURN_ANIM_MS = 980;
+const KT6_DECK_OPEN_MS = 720;
 const FIVE_SLIDE_IN_MS = 600;
 const FIVE_SLIDE_HOLD_MS = 1200;
 const FIVE_SLIDE_OUT_MS = 520;
@@ -1943,6 +1954,7 @@ const state = {
   effectKt3: null,
   effectKt2: null,
   effectKt7: null,
+  effectKt6: null,
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
@@ -1986,6 +1998,8 @@ const ui = {
   effect8TargetPlayerId: null,
 
   effectKt2Selecting: false,
+  effectKt6SelectingDiscard: false,
+  effectKt6Confirming: false,
 
   kt8Guessing: false,
   kt8GuessOptions: [],
@@ -2046,6 +2060,7 @@ const zoomCardEl = document.getElementById('zoomCard');
 const confirmPop = document.getElementById('confirmPop');
 const confirmMsg = document.getElementById('confirmMsg');
 const btnConfirmYes = document.getElementById('btnConfirmYes');
+const btnConfirmNo = document.getElementById('btnConfirmNo');
 const kt8GuessPanel = document.getElementById('kt8GuessPanel');
 
 const globalXBackdrop = document.getElementById('globalXBackdrop');
@@ -2197,21 +2212,34 @@ btnHelpClose.addEventListener('click', closeHelp);
 helpBackdrop.addEventListener('click', (e) => { if (e.target === helpBackdrop) closeHelp(); });
 
 btnConfirmYes.addEventListener('click', async () => {
-  if (typeof ui.confirmAction === 'function'){
-    const fn = ui.confirmAction;
+  const action = ui.confirmAction;
+  if (action && typeof action.yes === 'function'){
+    const fn = action.yes;
     ui.confirmAction = null;
     hideConfirmPop();
     await fn();
   }
 });
 
-function showConfirmPop(text, onYes){
+btnConfirmNo?.addEventListener('click', async () => {
+  const action = ui.confirmAction;
+  if (action && typeof action.no === 'function'){
+    const fn = action.no;
+    ui.confirmAction = null;
+    hideConfirmPop();
+    await fn();
+  }
+});
+
+function showConfirmPop(text, onYes, onNo = null){
   confirmMsg.textContent = text || '閉じてもいいですか';
-  ui.confirmAction = onYes;
+  ui.confirmAction = { yes: onYes, no: onNo };
+  if (btnConfirmNo) btnConfirmNo.classList.toggle('hidden', !(typeof onNo === 'function'));
   confirmPop.classList.remove('hidden');
 }
 function hideConfirmPop(){
   confirmPop.classList.add('hidden');
+  if (btnConfirmNo) btnConfirmNo.classList.add('hidden');
   ui.confirmAction = null;
 }
 
@@ -3270,6 +3298,45 @@ function subscribeEffect6(){
   });
 }
 
+
+function subscribeEffectKt6(){
+  const eRef = ref(db, `rooms/${state.roomCode}/effectKt6`);
+  onValue(eRef, snap => {
+    const raw = snap.val() || null;
+    state.effectKt6 = raw;
+
+    const mine = raw && raw.playerId === state.userId;
+    const phase = String(raw?.phase || '');
+
+    ui.effectKt6SelectingDiscard = !!(mine && phase === 'selectDiscard');
+    ui.effectKt6Confirming = !!(mine && phase === 'confirmShuffle');
+
+    if (!ui.effectKt6SelectingDiscard && kt6drag.active){
+      cleanupKt6Drag();
+    }
+
+    if (mine && phase === 'confirmShuffle' && !state.gameOver){
+      showConfirmPop('この2枚をシャッフルしますか', async () => {
+        await handleKt6ConfirmShuffle(true);
+      }, async () => {
+        await handleKt6ConfirmShuffle(false);
+      });
+    } else if (!(state.effect3?.playerId === state.userId && state.effect3?.phase === 'confirm')
+      && !(state.effect4?.playerId === state.userId && state.effect4?.phase === 'confirm')
+      && !(state.effect8?.playerId === state.userId && state.effect8?.phase === 'guessResult')
+      && !(state.effectKt7?.playerId === state.userId && state.effectKt7?.phase === 'confirm')){
+      hideConfirmPop();
+    }
+
+    if (raw && (phase === 'collectingPair' || phase === 'returningPair')){
+      runKt6PhaseAnimations(raw);
+    }
+
+    updateTurnUI();
+    renderHands();
+  });
+}
+
 function subscribeEffect7(){
   const eRef = ref(db, `rooms/${state.roomCode}/effect7`);
   onValue(eRef, snap => {
@@ -3330,7 +3397,8 @@ function subscribeEffect7(){
         });
       } else if (!(state.effect3?.playerId === state.userId && state.effect3?.phase === 'confirm')
         && !(state.effect4?.playerId === state.userId && state.effect4?.phase === 'confirm')
-        && !(state.effect8?.playerId === state.userId && state.effect8?.phase === 'guessResult')){
+        && !(state.effect8?.playerId === state.userId && state.effect8?.phase === 'guessResult')
+      && !(state.effectKt6?.playerId === state.userId && state.effectKt6?.phase === 'confirmShuffle')){
         hideConfirmPop();
       }
     } else if (mode === 'kt5'){
@@ -3425,7 +3493,8 @@ function subscribeEffect8(){
         await finishKt8MismatchAndAdvance();
       });
     } else if (!(state.effect3?.playerId === state.userId && state.effect3?.phase === 'confirm')
-      && !(state.effect4?.playerId === state.userId && state.effect4?.phase === 'confirm')){
+      && !(state.effect4?.playerId === state.userId && state.effect4?.phase === 'confirm')
+      && !(state.effectKt6?.playerId === state.userId && state.effectKt6?.phase === 'confirmShuffle')){
       hideConfirmPop();
       hidePeekCard();
     }
@@ -3591,7 +3660,7 @@ function subscribeRuinMoveEvent(){
     const fromPlayedIndex = Number(ev.fromPlayedIndex);
 
     if (!fromPid) return;
-    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played') return;
+    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played' && mode !== 'kt6DeckTop') return;
 
     if (mode === 'oneReveal' || mode === 'kt8'){
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
@@ -3614,6 +3683,15 @@ function subscribeRuinMoveEvent(){
     }
     if (mode === 'kt5Played'){
       animateMoveFromPlayedToRuin(fromPid, fromPlayedIndex, slotIndex);
+      return;
+    }
+    if (mode === 'kt6DeckTop'){
+      const showFace = fromPid === state.userId;
+      animateKt6DeckTopMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex, { showFace });
+      return;
+    }
+    if (mode === 'kt6DiscardMove'){
+      animateKt6DiscardMoveToRuin(fromPid, fromPlayedIndex, String(cardValue ?? ''), slotIndex);
       return;
     }
 
@@ -3802,6 +3880,7 @@ let e7pickDrag = { active:false, slotIndex:null, pointerId:null, ghostEl:null, o
 let e8drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overTarget:false, targetPlayerId:null, sourceEl:null };
 
 let kt2drag = { active:false, pointerId:null, ghostEl:null, sourceEl:null, overDeck:false, fromPlayerId:null, fromPlayedIndex:null };
+let kt6drag = { active:false, pointerId:null, ghostEl:null, sourceEl:null, overSlot:false, slotIndex:null, fromPlayerId:null, fromPlayedIndex:null };
 
 
 function cleanupDrag(){
@@ -3906,6 +3985,103 @@ function cleanupKt2Drag({ keepSourceHidden = false } = {}){
   kt2drag.fromPlayedIndex = null;
   setDeckDropActive(false);
   setDeckDropHint(false);
+}
+
+
+function cleanupKt6Drag({ keepSourceHidden = false } = {}){
+  if (kt6drag.ghostEl) kt6drag.ghostEl.remove();
+  if (kt6drag.sourceEl && !keepSourceHidden) kt6drag.sourceEl.classList.remove('drag-source-hidden');
+  kt6drag.active = false;
+  kt6drag.pointerId = null;
+  kt6drag.ghostEl = null;
+  kt6drag.sourceEl = null;
+  kt6drag.overSlot = false;
+  kt6drag.slotIndex = null;
+  kt6drag.fromPlayerId = null;
+  kt6drag.fromPlayedIndex = null;
+  clearRuinSlotHighlights();
+}
+
+function onKt6PlayedPointerDown(e, cardEl){
+  if (!ui.effectKt6SelectingDiscard) return;
+  const fromPid = cardEl?.dataset?.pid || '';
+  const fromIdx = Number(cardEl?.dataset?.playedIndex || cardEl?.dataset?.index || 0);
+  if (!fromPid || fromPid === state.userId) return;
+
+  const ef = state.effectKt6;
+  const slots = getRuinsSlots();
+  let slotIndex = firstEmptyRuinSlotIndex(slots);
+  if (slotIndex === null || slotIndex === Number(ef?.deckSlotIndex)){
+    for (let i=0;i<6;i++){
+      if (!slots[i] && i !== Number(ef?.deckSlotIndex)){
+        slotIndex = i;
+        break;
+      }
+    }
+  }
+  if (slotIndex === null) return;
+
+  startZoomTap(e, cardEl);
+
+  kt6drag.active = true;
+  kt6drag.pointerId = e.pointerId;
+  kt6drag.overSlot = false;
+  kt6drag.slotIndex = slotIndex;
+  kt6drag.fromPlayerId = fromPid;
+  kt6drag.fromPlayedIndex = Number.isFinite(fromIdx) ? fromIdx : 0;
+
+  kt6drag.sourceEl = cardEl;
+  cardEl.classList.add('drag-source-hidden');
+
+  const ghost = document.createElement('div');
+  ghost.className = 'drag-ghost';
+  setCardFace(ghost, cardEl.dataset.value || cardEl.textContent || '');
+  document.body.appendChild(ghost);
+  kt6drag.ghostEl = ghost;
+
+  ghost.style.left = `${e.clientX}px`;
+  ghost.style.top  = `${e.clientY}px`;
+
+  setHintRuinSlotHighlight(slotIndex);
+  setRuinSlotActive(slotIndex, false);
+
+  cardEl.setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
+function onKt6PlayedPointerMove(e){
+  if (!kt6drag.active || kt6drag.pointerId !== e.pointerId || !kt6drag.ghostEl) return;
+  e.preventDefault();
+  kt6drag.ghostEl.style.left = `${e.clientX}px`;
+  kt6drag.ghostEl.style.top  = `${e.clientY}px`;
+
+  const slotEl = getRuinSlotEl(kt6drag.slotIndex);
+  if (!slotEl) return;
+  const r = slotEl.getBoundingClientRect();
+  const over = isPointInRect(e.clientX, e.clientY, r);
+  kt6drag.overSlot = over;
+  setRuinSlotActive(kt6drag.slotIndex, over);
+}
+
+async function onKt6PlayedPointerUp(e){
+  if (!kt6drag.active || kt6drag.pointerId !== e.pointerId) return;
+  const shouldDrop = kt6drag.overSlot;
+  const fromPid = kt6drag.fromPlayerId;
+  const fromIdx = kt6drag.fromPlayedIndex;
+  const cardEl = e.currentTarget;
+  cleanupKt6Drag({ keepSourceHidden: shouldDrop });
+  try { cardEl.releasePointerCapture(e.pointerId); } catch {}
+
+  if (shouldDrop){
+    await handleKt6DropFromPlayed(fromPid, fromIdx, cardEl);
+  }
+}
+
+function onKt6PlayedPointerCancel(e){
+  if (!kt6drag.active || kt6drag.pointerId !== e.pointerId) return;
+  const cardEl = e.currentTarget;
+  cleanupKt6Drag();
+  try { cardEl.releasePointerCapture(e.pointerId); } catch {}
 }
 
 function onKt2PlayedPointerDown(e, cardEl){
@@ -4087,7 +4263,7 @@ function onZoomTapEnd(e){
   const moved = zoomTapState.moved;
   clearZoomTapState();
   if (moved) return;
-  if (drag.active || e2drag.active || e6drag.active || e7drag.active || e7pickDrag.active || e8drag.active || kt2drag.active) return;
+  if (drag.active || e2drag.active || e6drag.active || e7drag.active || e7pickDrag.active || e8drag.active || kt2drag.active || kt6drag.active) return;
   openZoomFromCard(target);
 }
 
@@ -6024,6 +6200,109 @@ function runKt5PhaseAnimations(raw){
   }
 }
 
+
+function runKt6PhaseAnimations(raw){
+  const id = String(raw?.id || '');
+  const phase = String(raw?.phase || '');
+  const pairSlots = Array.isArray(raw?.pairSlots) ? raw.pairSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  if (!id || !phase || pairSlots.length < 2) return;
+
+  if (phase === 'collectingPair'){
+    const key = `${id}:${raw?.at || ''}:collectPair`;
+    if (key !== lastKt7CollectAnimKey){
+      lastKt7CollectAnimKey = key;
+      animateKt5CollectToCenter(pairSlots);
+    }
+  }
+
+  if (phase === 'returningPair'){
+    const key = `${id}:${raw?.at || ''}:returnPair`;
+    if (key !== lastKt7ReturnAnimKey){
+      lastKt7ReturnAnimKey = key;
+      animateKt5ReturnFromCenter(pairSlots);
+    }
+  }
+}
+
+async function animateKt6DeckTopMoveToRuin(playerId, cardValue, slotIndex, { showFace = false } = {}){
+  const deckRect = deckPile.getBoundingClientRect();
+  const startX = deckRect.left + deckRect.width / 2;
+  const startY = deckRect.top + deckRect.height / 2;
+  const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
+
+  const flyer = document.createElement('div');
+  flyer.className = showFace ? 'front-flyer face-flyer' : 'back-flyer';
+  if (showFace) setCardFace(flyer, cardValue);
+  flyer.style.left = `${startX}px`;
+  flyer.style.top = `${startY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-4deg) scale(1.02)';
+  document.body.appendChild(flyer);
+
+  await sleep(0);
+  flyer.style.transition = 'left 460ms ease, top 460ms ease, transform 460ms ease';
+  flyer.style.left = `${endX}px`;
+  flyer.style.top = `${endY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(4deg) scale(0.86)';
+  await sleep(500);
+
+  if (showFace){
+    flyer.style.transition = 'background 120ms ease, opacity 120ms ease';
+    flyer.style.backgroundImage = 'var(--card-back-image)';
+    const faceEl = flyer.querySelector('.card-face');
+    if (faceEl) faceEl.style.opacity = '0';
+    await sleep(140);
+  }
+
+  await waitForRuinCard(slotIndex);
+  flyer.style.opacity = '0';
+  await sleep(120);
+  flyer.remove();
+}
+
+async function animateKt6DiscardMoveToRuin(playerId, playedIndex, cardValue, slotIndex){
+  const cardEl = Number.isFinite(Number(playedIndex))
+    ? playerCircle.querySelector(`.played-card[data-pid="${playerId}"][data-played-index="${Number(playedIndex)}"]`)
+    : null;
+
+  let startX;
+  let startY;
+  if (cardEl){
+    const cr = cardEl.getBoundingClientRect();
+    startX = cr.left + cr.width / 2;
+    startY = cr.top + cr.height / 2;
+    cardEl.classList.add('drag-source-hidden');
+  } else {
+    const anchor = getPlayerAnchorEl(playerId);
+    if (anchor){
+      const sr = anchor.getBoundingClientRect();
+      startX = sr.left + sr.width/2;
+      startY = sr.top + sr.height/2;
+    }
+  }
+  if (!Number.isFinite(startX) || !Number.isFinite(startY)) return;
+
+  const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
+  const flyer = document.createElement('div');
+  flyer.className = 'front-flyer face-flyer ruin-reveal-flyer';
+  setCardFace(flyer, cardValue);
+  flyer.style.left = `${startX}px`;
+  flyer.style.top  = `${startY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1.1)';
+  document.body.appendChild(flyer);
+
+  await sleep(0);
+  flyer.style.transition = 'left 520ms cubic-bezier(0.22, 1, 0.36, 1), top 520ms cubic-bezier(0.22, 1, 0.36, 1), transform 520ms cubic-bezier(0.22, 1, 0.36, 1)';
+  flyer.style.left = `${endX}px`;
+  flyer.style.top  = `${endY}px`;
+  flyer.style.transform = 'translate(-50%,-50%) rotate(2deg) scale(0.7)';
+  await sleep(540);
+
+  await waitForRuinCard(slotIndex);
+  flyer.style.opacity = '0';
+  await sleep(120);
+  flyer.remove();
+}
+
 async function animateTakeFromRuinToMyHand(slotIndex, cardValue){
   const { x:startX, y:startY } = getRuinSlotCenterByIndex(slotIndex);
 
@@ -6456,6 +6735,10 @@ async function playCardFromHand(cardIndex){
   }
   if (usedKey === 'kt5'){
     await resolveKt5(myId);
+    return;
+  }
+  if (usedKey === 'kt6'){
+    await resolveKt6(myId);
     return;
   }
   if (usedKey === '8'){
@@ -7650,6 +7933,218 @@ async function resolveKt5(playerId){
   await advanceTurnToNextPlayer();
 }
 
+
+async function resolveKt6(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  const slotsBefore = getRuinsSlots();
+  const deckSlotIndex = firstEmptyRuinSlotIndex(slotsBefore);
+  if (deckSlotIndex === null){
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await update(turnRef, { paused:true });
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'moveDeckTop',
+    at: Date.now(),
+    deckSlotIndex,
+    discardSlotIndex: null,
+    deckCardValue: null,
+    discardCardValue: null,
+    selectedDiscardPlayerId: null,
+    selectedDiscardIndex: null,
+  });
+
+  const drawn = await drawOneFromDeckAtomic();
+  if (!drawn){
+    await set(ref(db, `rooms/${state.roomCode}/effectKt6`), null);
+    await handleDeckExhausted(playerId, seq, 'kt6');
+    return;
+  }
+
+  await emitRuinMoveEvent(playerId, drawn, deckSlotIndex, 'kt6DeckTop');
+  await sleep(RUIN_MOVE_ANIM_MS + KT6_DECK_OPEN_MS);
+
+  const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+  await runTransaction(ruinsRef, (ruins) => {
+    const src = Array.isArray(ruins) ? [...ruins] : [];
+    const slots = new Array(6).fill(null);
+    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    if (slots[deckSlotIndex]) return slots;
+    slots[deckSlotIndex] = { v: String(drawn), by: playerId, at: Date.now() };
+    return slots;
+  }, { applyLocally:false });
+
+  const hasOtherPlayed = (latestPlayers || []).some((p) => {
+    if (!p?.id || p.id === playerId) return false;
+    const arr = Array.isArray(state.played?.[p.id]) ? state.played[p.id] : [];
+    return arr.length > 0;
+  });
+
+  if (!hasOtherPlayed){
+    await set(ref(db, `rooms/${state.roomCode}/effectKt6`), null);
+    await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'selectDiscard',
+    at: Date.now(),
+    deckSlotIndex,
+    discardSlotIndex: null,
+    deckCardValue: String(drawn),
+    discardCardValue: null,
+    selectedDiscardPlayerId: null,
+    selectedDiscardIndex: null,
+  });
+}
+
+async function handleKt6DropFromPlayed(fromPlayerId, fromPlayedIndex, cardEl){
+  if (!state.roomCode) return;
+  const ef = state.effectKt6;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'selectDiscard') return;
+
+  const baseSlots = getRuinsSlots();
+  let slotIndex = firstEmptyRuinSlotIndex(baseSlots);
+  if (slotIndex === null || slotIndex === Number(ef.deckSlotIndex)){
+    for (let i=0;i<6;i++){
+      if (!baseSlots[i] && i !== Number(ef.deckSlotIndex)){
+        slotIndex = i;
+        break;
+      }
+    }
+  }
+  if (slotIndex === null) return;
+
+  const playedRef = ref(db, `rooms/${state.roomCode}/played/${fromPlayerId}`);
+  let removedValue = null;
+  const rem = await runTransaction(playedRef, (arr) => {
+    const src = Array.isArray(arr) ? [...arr] : [];
+    const idx = Math.max(0, Math.min(src.length - 1, Number(fromPlayedIndex)));
+    if (!src.length || idx < 0 || idx >= src.length) return src;
+    removedValue = src.splice(idx, 1)[0];
+    return src;
+  }, { applyLocally:false });
+
+  if (!rem.committed || removedValue == null) return;
+
+  await emitRuinMoveEvent(fromPlayerId, removedValue, slotIndex, 'kt6DiscardMove', { fromPlayedIndex });
+  await sleep(RUIN_MOVE_ANIM_MS);
+
+  const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+  await runTransaction(ruinsRef, (ruins) => {
+    const src = Array.isArray(ruins) ? [...ruins] : [];
+    const slots = new Array(6).fill(null);
+    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    if (slots[slotIndex]) return slots;
+    slots[slotIndex] = { v: String(removedValue), by: fromPlayerId, at: Date.now() };
+    return slots;
+  }, { applyLocally:false });
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    ...ef,
+    phase: 'confirmShuffle',
+    at: Date.now(),
+    discardSlotIndex: slotIndex,
+    discardCardValue: String(removedValue),
+    selectedDiscardPlayerId: fromPlayerId,
+    selectedDiscardIndex: Number(fromPlayedIndex),
+  });
+}
+
+async function handleKt6ConfirmShuffle(doShuffle){
+  if (!state.roomCode) return;
+  const ef = state.effectKt6;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'confirmShuffle') return;
+
+  if (!doShuffle){
+    const discardSlotIndex = Number(ef.discardSlotIndex);
+    const discardValue = String(ef.discardCardValue ?? '');
+    const targetPlayerId = String(ef.selectedDiscardPlayerId || '');
+    if (Number.isFinite(discardSlotIndex) && discardSlotIndex >= 0 && discardSlotIndex < 6 && discardValue && targetPlayerId){
+      await runTransaction(ref(db, `rooms/${state.roomCode}/ruins`), (ruins) => {
+        const src = Array.isArray(ruins) ? [...ruins] : [];
+        const slots = new Array(6).fill(null);
+        for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+        if (slots[discardSlotIndex]) slots[discardSlotIndex] = null;
+        return slots;
+      }, { applyLocally:false });
+
+      await runTransaction(ref(db, `rooms/${state.roomCode}/played/${targetPlayerId}`), (arr) => {
+        const src = Array.isArray(arr) ? [...arr] : [];
+        src.push(discardValue);
+        return src;
+      }, { applyLocally:false });
+    }
+
+    await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+      ...ef,
+      phase: 'selectDiscard',
+      at: Date.now(),
+      discardSlotIndex: null,
+      discardCardValue: null,
+      selectedDiscardPlayerId: null,
+      selectedDiscardIndex: null,
+    });
+    return;
+  }
+
+  const pairSlots = [Number(ef.deckSlotIndex), Number(ef.discardSlotIndex)].filter(n => Number.isFinite(n));
+  if (pairSlots.length !== 2){
+    return;
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    ...ef,
+    phase: 'collectingPair',
+    at: Date.now(),
+    pairSlots,
+  });
+
+  await sleep(KT7_COLLECT_ANIM_MS);
+
+  const shouldSwap = Math.random() < 0.5;
+  await runTransaction(ref(db, `rooms/${state.roomCode}/ruins`), (ruins) => {
+    const src = Array.isArray(ruins) ? [...ruins] : [];
+    const slots = new Array(6).fill(null);
+    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const [a,b] = pairSlots;
+    if (!slots[a] || !slots[b]) return slots;
+    if (shouldSwap){
+      const tmp = slots[a];
+      slots[a] = slots[b];
+      slots[b] = tmp;
+    }
+    return slots;
+  }, { applyLocally:false });
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    ...ef,
+    phase: 'returningPair',
+    at: Date.now(),
+    pairSlots,
+    swapped: shouldSwap,
+  });
+
+  await sleep(KT7_RETURN_ANIM_MS);
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), null);
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
+}
+
 async function resolveKt3(playerId){
   if (!state.roomCode) return;
   const seq = state.turn.turnSeq;
@@ -8218,6 +8713,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeEffect4();
   subscribeEffectKt2();
   subscribeEffect6();
+  subscribeEffectKt6();
   subscribeEffect7();
   subscribeEffect8();
 
@@ -8368,14 +8864,20 @@ function renderRuinsArea(){
   const mineKt3Picking   = !!(state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'pickRuins');
   const mineKt3Placing   = !!(ui.effectKt3Returning && state.effectKt3 && state.effectKt3.playerId === state.userId && state.effectKt3.phase === 'placeBack');
   const efKt7 = state.effectKt7;
+  const efKt6 = state.effectKt6;
   const efKt5 = state.effect7 && String(state.effect7?.mode || '') === 'kt5' ? state.effect7 : null;
   const kt7Mine = !!(efKt7 && efKt7.playerId === state.userId);
   const kt7Phase = String(efKt7?.phase || '');
   const kt5Phase = String(efKt5?.phase || '');
   const mineKt7Selecting = !!(kt7Mine && kt7Phase === 'selectPair');
   const mineKt7Inspecting = !!(kt7Mine && kt7Phase === 'inspectPick');
+  const kt6Mine = !!(efKt6 && efKt6.playerId === state.userId);
+  const kt6Phase = String(efKt6?.phase || '');
+  const kt6PairSlots = Array.isArray(efKt6?.pairSlots) ? efKt6.pairSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  const kt6DeckSlot = Number.isFinite(Number(efKt6?.deckSlotIndex)) ? Number(efKt6?.deckSlotIndex) : null;
+  const kt6DiscardSlot = Number.isFinite(Number(efKt6?.discardSlotIndex)) ? Number(efKt6?.discardSlotIndex) : null;
 
-  if (mine6Selecting || mine7Picking || mine7Placing || mineKt3Picking || mineKt3Placing || mineKt7Selecting || mineKt7Inspecting) wrap.classList.add('drop-enabled');
+  if (mine6Selecting || mine7Picking || mine7Placing || mineKt3Picking || mineKt3Placing || mineKt7Selecting || mineKt7Inspecting || (kt6Mine && kt6Phase === 'selectDiscard')) wrap.classList.add('drop-enabled');
 
   const slots = getRuinsSlots();
   const kt7HintSlots = Array.isArray(efKt7?.hintSlots) ? efKt7.hintSlots.map(Number).filter(n => Number.isFinite(n)) : [];
@@ -8387,7 +8889,7 @@ function renderRuinsArea(){
     const slot = document.createElement('div');
     slot.className = 'ruins-slot';
     slot.dataset.i = String(i);
-    if ((mine7Placing && Number(ui.effect7TargetSlot) === i) || (mineKt3Placing && Number(ui.effectKt3TargetSlot) === i) || kt7HintSlots.includes(i)) slot.classList.add('hint-target');
+    if ((mine7Placing && Number(ui.effect7TargetSlot) === i) || (mineKt3Placing && Number(ui.effectKt3TargetSlot) === i) || kt7HintSlots.includes(i) || (kt6Mine && kt6Phase === 'selectDiscard' && kt6DiscardSlot === null && i !== kt6DeckSlot && !slots[i])) slot.classList.add('hint-target');
     wrap.appendChild(slot);
   }
 
@@ -8451,6 +8953,9 @@ function renderRuinsArea(){
       card.classList.add('effect7-ghost-hidden');
     }
     if ((kt5Phase === 'collectingAll' || kt5Phase === 'returningAll') && kt5SelectedSlots.includes(i)){
+      card.classList.add('effect7-ghost-hidden');
+    }
+    if ((kt6Phase === 'collectingPair' || kt6Phase === 'returningPair') && kt6PairSlots.includes(i)){
       card.classList.add('effect7-ghost-hidden');
     }
     if (Array.isArray(ui.kt7ReturnAnimatingSlots) && ui.kt7ReturnAnimatingSlots.includes(i)){
@@ -8666,6 +9171,7 @@ function renderPlayerCircle(players){
   const e4MineSelecting = !!(state.effect4 && state.effect4.playerId === state.userId && state.effect4.phase === 'select');
   const e8MineSelecting = !!(state.effect8 && state.effect8.playerId === state.userId && state.effect8.phase === 'select');
   const kt2MineSelecting = !!(state.effectKt2 && state.effectKt2.playerId === state.userId && state.effectKt2.phase === 'select');
+  const kt6MineSelectingDiscard = !!(state.effectKt6 && state.effectKt6.playerId === state.userId && state.effectKt6.phase === 'selectDiscard');
   const pickMode = (e3MineSelecting || e4MineSelecting || e8MineSelecting) && !state.gameOver;
 
   players.forEach((p, idx) => {
@@ -8885,6 +9391,15 @@ function renderPlayerCircle(players){
           c.addEventListener('pointercancel', onKt2PlayedPointerCancel);
         }
 
+        if (kt6MineSelectingDiscard && p.id !== state.userId){
+          c.classList.add('kt6-pickable');
+          c.draggable = false;
+          c.addEventListener('pointerdown', (ev) => onKt6PlayedPointerDown(ev, c));
+          c.addEventListener('pointermove', onKt6PlayedPointerMove);
+          c.addEventListener('pointerup', onKt6PlayedPointerUp);
+          c.addEventListener('pointercancel', onKt6PlayedPointerCancel);
+        }
+
         row.appendChild(c);
       });
 
@@ -8954,6 +9469,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effect3`), null),
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect6`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectKt6`), null),
     set(ref(db, `rooms/${state.roomCode}/effect7`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
@@ -9010,6 +9526,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effect3`)),
     remove(ref(db, `${base}/effect4`)),
     remove(ref(db, `${base}/effect6`)),
+    remove(ref(db, `${base}/effectKt6`)),
     remove(ref(db, `${base}/effect7`)),
     remove(ref(db, `${base}/effect8`)),
     remove(ref(db, `${base}/effectKt2`)),
