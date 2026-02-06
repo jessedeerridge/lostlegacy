@@ -5551,7 +5551,7 @@ async function handleEffect3Pick(targetPlayerId, cardIndex){
     return;
   }
 
-  if (revealed === 'x' || revealed === '✕'){
+  if (revealed === 'x' || revealed === '✕' || revealed === 'ktx'){
     await resolveXReveal(targetPlayerId, idx, null, state.userId);
     return;
   }
