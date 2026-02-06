@@ -1991,6 +1991,7 @@ const ui = {
   kt8GuessOptions: [],
 
   kt4ShuffleAnimating: false,
+  kt7ReturnAnimatingSlots: [],
 
   confirmAction: null,
 };
@@ -5709,6 +5710,9 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
   const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 5).slice(0,2);
   if (!idxs.length) return;
 
+  ui.kt7ReturnAnimatingSlots = [...idxs];
+  renderHands();
+
   const pc = playerCircle.getBoundingClientRect();
   const cx = pc.left + pc.width/2;
   const cy = pc.top + pc.height/2 + RUINS_SHIFT_Y;
@@ -5793,6 +5797,8 @@ async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false)
   await sleep(700);
   flyers.forEach((flyer) => flyer.remove());
   kt7PairAnimSession = null;
+  ui.kt7ReturnAnimatingSlots = [];
+  renderHands();
 }
 
 function runKt7PhaseAnimations(raw){
@@ -8045,6 +8051,9 @@ function renderRuinsArea(){
       card.classList.add('effect7-pair-picked');
     }
     if ((kt7Phase === 'collectingPair' || kt7Phase === 'returningPair') && kt7SelectedSlots.includes(i)){
+      card.classList.add('effect7-ghost-hidden');
+    }
+    if (Array.isArray(ui.kt7ReturnAnimatingSlots) && ui.kt7ReturnAnimatingSlots.includes(i)){
       card.classList.add('effect7-ghost-hidden');
     }
 
