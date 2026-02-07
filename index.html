@@ -1076,6 +1076,30 @@
   .confirm-pop .btn.primary{ background:#111; border-color:#111; color:#fff; }
   .confirm-pop .btn.nowrap{ white-space:nowrap; }
 
+  /* 画面下：行動説明ポップ（水色塗り・黒字） */
+  .action-hint-pop{
+    position:fixed;
+    left:50%;
+    bottom:12px;
+    transform:translateX(-50%);
+    background:#bfe8ff;
+    border:1px solid rgba(0,0,0,.12);
+    border-radius:14px;
+    box-shadow:0 12px 28px rgba(0,0,0,.18);
+    padding:10px 14px;
+    z-index:905;
+    min-width:280px;
+    max-width:calc(100% - 24px);
+    color:#111;
+    font-size:13px;
+    font-weight:700;
+    line-height:1.4;
+    text-align:center;
+    pointer-events:none;
+  }
+  .action-hint-pop.hidden{ display:none; }
+  .action-hint-pop.with-confirm{ bottom:70px; }
+
   /* ===== 全員：⑤スライド演出 ===== */
   .global-slide-card{
     position:fixed;
@@ -1596,6 +1620,10 @@
   <button class="btn primary nowrap" id="btnConfirmYes">はい</button>
 </div>
 
+<div id="actionHintPop" class="action-hint-pop hidden">
+  <div id="actionHintMsg"></div>
+</div>
+
 <div id="kt8GuessPanel" class="kt8-guess-panel hidden"></div>
 
 <!-- ★全員：✕拡大＋揺れ -->
@@ -2086,6 +2114,8 @@ const confirmPop = document.getElementById('confirmPop');
 const confirmMsg = document.getElementById('confirmMsg');
 const btnConfirmYes = document.getElementById('btnConfirmYes');
 const btnConfirmNo = document.getElementById('btnConfirmNo');
+const actionHintPop = document.getElementById('actionHintPop');
+const actionHintMsg = document.getElementById('actionHintMsg');
 const kt8GuessPanel = document.getElementById('kt8GuessPanel');
 
 const globalXBackdrop = document.getElementById('globalXBackdrop');
@@ -2321,6 +2351,7 @@ function showConfirmPop(text, onYes, options = {}){
   if (btnConfirmYes) btnConfirmYes.textContent = yesText;
 
   confirmPop.classList.remove('hidden');
+  renderActionHintPop();
 }
 function hideConfirmPop(){
   confirmPop.classList.add('hidden');
@@ -2331,6 +2362,7 @@ function hideConfirmPop(){
     btnConfirmNo.textContent = 'いいえ';
   }
   if (btnConfirmYes) btnConfirmYes.textContent = 'はい';
+  renderActionHintPop();
 }
 
 function showKt8GuessPanel(options, onPick){
@@ -2403,6 +2435,72 @@ function showCenterNotice(text){
 function hideCenterNotice(){
   if (!centerNotice) return;
   centerNotice.classList.add('hidden');
+}
+
+function getActionHintText(){
+  const myId = state.userId;
+
+  const ef2 = state.effect2;
+  if (ef2){
+    const mine = ef2.playerId === myId;
+    return mine
+      ? '2 山札にカードを1枚戻してください。'
+      : '2 山札から1枚ドローして、手札のカードと交換できる。';
+  }
+
+  const ef3 = state.effect3;
+  if (ef3){
+    const mine = ef3.playerId === myId;
+    return mine
+      ? '3 見たいカードを選んでください。'
+      : '3 プレイヤーの手札を見た時に、5であれば勝つ。';
+  }
+
+  const ef4 = state.effect4;
+  if (ef4 && String(ef4.mode || 'normal') !== 'kt4'){
+    const mine = ef4.playerId === myId;
+    return mine
+      ? '4 見たいカードを選んでください。'
+      : '4 プレイヤーの手札を見た時に、✕であれば脱落させる。';
+  }
+
+  const ef6 = state.effect6;
+  if (ef6){
+    const mine = ef6.playerId === myId;
+    return mine
+      ? '6 遺跡にカードを1枚置いてください。'
+      : '6 山札から1枚ドローして、好きなカードを遺跡に置く。';
+  }
+
+  const ef7 = state.effect7;
+  if (ef7 && !['kt3', 'kt5', 'kt7'].includes(String(ef7.mode || 'normal'))){
+    const mine = ef7.playerId === myId;
+    if (!mine) return '7 遺跡から1枚とって、手札のカードと交換できる。';
+    if (ef7.phase === 'placeBack') return '7 遺跡にカードを1枚置いてください。';
+    return '7 遺跡から1枚選んでください。';
+  }
+
+  const ef8 = state.effect8;
+  if (ef8 && String(ef8.mode || 'normal') !== 'kt8'){
+    const mine = ef8.playerId === myId;
+    if (!mine) return '8 プレイヤーの手札をとって、交換できる。';
+    if (ef8.phase === 'return') return '8 プレイヤーにカードを1枚渡してください。';
+    return '8 カードを選んで、とってください。';
+  }
+
+  return '';
+}
+
+function renderActionHintPop(){
+  if (!actionHintPop || !actionHintMsg) return;
+  const text = getActionHintText();
+  if (!text || state.gameOver){
+    actionHintPop.classList.add('hidden');
+    return;
+  }
+  actionHintMsg.textContent = text;
+  actionHintPop.classList.toggle('with-confirm', !confirmPop?.classList.contains('hidden'));
+  actionHintPop.classList.remove('hidden');
 }
 
 async function showExplorationFace(){
@@ -3161,6 +3259,8 @@ function updateTurnUI(){
     hideGameOver();
     hideCenterNotice();
   }
+
+  renderActionHintPop();
 }
 
 function updateHostUI(){
