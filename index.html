@@ -2509,10 +2509,11 @@ function getActionHintData(){
   }
 
   const ef7 = state.effect7;
-  if (ef7 && String(ef7.mode || 'normal') === 'kt3'){
-    const mine = ef7.playerId === myId;
+  const efKt3 = state.effectKt3 || ((ef7 && String(ef7.mode || 'normal') === 'kt3') ? ef7 : null);
+  if (efKt3){
+    const mine = efKt3.playerId === myId;
     if (!mine) return { mine, text: '3 遺跡から2枚見て、好きなカードを取る。その後、手札のカードを1枚遺跡に置く。' };
-    if (ef7.phase === 'placeBack') return { mine, text: '好きなカードを1枚とった後で、どちらかを遺跡に置いてください。' };
+    if (efKt3.phase === 'placeBack') return { mine, text: '好きなカードを1枚とった後で、どちらかを遺跡に置いてください。' };
     return { mine, text: '遺跡から2枚まで見たいカードを選んでください。' };
   }
 
@@ -2523,10 +2524,11 @@ function getActionHintData(){
     };
   }
 
-  if (ef7 && String(ef7.mode || 'normal') === 'kt7'){
-    const mine = ef7.playerId === myId;
+  const efKt7 = state.effectKt7 || ((ef7 && String(ef7.mode || 'normal') === 'kt7') ? ef7 : null);
+  if (efKt7){
+    const mine = efKt7.playerId === myId;
     if (!mine) return { mine, text: '7 遺跡のカード2枚を見ずに混ぜる。その後、好きな遺跡のカードを見る。' };
-    if (ef7.phase === 'inspectPick') return { mine, text: '遺跡から見たいカードを選んでください。' };
+    if (efKt7.phase === 'inspectPick') return { mine, text: '遺跡から見たいカードを選んでください。' };
     return { mine, text: '混ぜる遺跡のカードを2枚選んでください。' };
   }
 
