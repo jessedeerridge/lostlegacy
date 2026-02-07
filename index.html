@@ -7906,6 +7906,21 @@ async function handleKt6DiscardDrop(fromPlayerId, fromPlayedIndex){
   const removedValue = (playedArr.length && idx >= 0 && idx < playedArr.length) ? playedArr[idx] : null;
   if (removedValue == null) return false;
 
+  // ローカル先行反映：ドラッグ者に元の捨て札へ一瞬戻る見え方を出さない
+  const localPlayed = { ...(state.played || {}) };
+  const localArr = Array.isArray(localPlayed?.[fromPlayerId]) ? [...localPlayed[fromPlayerId]] : [];
+  if (localArr.length && idx >= 0 && idx < localArr.length){
+    localArr.splice(idx, 1);
+    localPlayed[fromPlayerId] = localArr;
+    state.played = localPlayed;
+  }
+  const localSlots = getRuinsSlots();
+  if (slotIndex >= 0 && slotIndex < localSlots.length){
+    localSlots[slotIndex] = { v: String(removedValue), by: fromPlayerId, at: Date.now() };
+    state.ruins = localSlots;
+  }
+  renderHands();
+
   await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
     ...ef,
     phase: 'selectDiscard',
