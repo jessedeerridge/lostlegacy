@@ -3363,6 +3363,12 @@ function subscribeEffectKt6(){
         noText: 'いいえ',
         yesText: 'はい',
       });
+    } else if (mine && raw?.phase === 'noDiscardConfirm' && !state.gameOver){
+      showConfirmPop('捨て札がないのでターンを終わります', async () => {
+        await confirmKt6NoDiscardAndAdvance();
+      }, {
+        yesText: 'はい',
+      });
     } else if (!(state.effect3?.playerId === state.userId && state.effect3?.phase === 'confirm')
       && !(state.effect4?.playerId === state.userId && state.effect4?.phase === 'confirm')
       && !(state.effect8?.playerId === state.userId && state.effect8?.phase === 'guessResult')
@@ -7871,6 +7877,30 @@ async function resolveKt6(playerId){
     return;
   }
 
+  const otherHasPlayed = Object.entries(state.played || {}).some(([pid, arr]) => {
+    if (String(pid) === String(playerId)) return false;
+    return Array.isArray(arr) && arr.length > 0;
+  });
+  if (!otherHasPlayed){
+    await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+      id: effectId,
+      playerId,
+      seq: Number(seq || 0),
+      phase: 'noDiscardConfirm',
+      at: Date.now(),
+      cardXSlotIndex,
+      cardXValue: String(drawn),
+      cardYSlotIndex: null,
+      cardYValue: null,
+      cardYFromPlayerId: null,
+      selectedSlots: [cardXSlotIndex],
+      hintSlots: [],
+      fromPlayedIndex: null,
+      faceUpSlots: [],
+    });
+    return;
+  }
+
   await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
     id: effectId,
     playerId,
@@ -7985,6 +8015,18 @@ async function handleKt6DiscardDrop(fromPlayerId, fromPlayedIndex){
   });
 
   return true;
+}
+
+async function confirmKt6NoDiscardAndAdvance(){
+  if (!state.roomCode) return;
+  if (state.gameOver) return;
+
+  const ef = state.effectKt6;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'noDiscardConfirm') return;
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), null);
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
 }
 
 async function confirmKt6Shuffle(doShuffle){
@@ -8918,7 +8960,7 @@ function renderRuinsArea(){
   const mineKt6SelectingDiscard = !!(efKt6 && efKt6.playerId === state.userId && kt6Phase === 'selectDiscard');
   const kt6SelectedSlots = Array.isArray(efKt6?.selectedSlots) ? efKt6.selectedSlots.map(Number).filter(n => Number.isFinite(n)) : [];
   const kt6FaceUpSlots = Array.isArray(efKt6?.faceUpSlots) ? efKt6.faceUpSlots.map(Number).filter(n => Number.isFinite(n)) : [];
-  const kt6ActorFaceUpSlots = (efKt6 && efKt6.playerId === state.userId && (kt6Phase === 'selectDiscard' || kt6Phase === 'confirmShuffle') && Number.isFinite(Number(efKt6?.cardXSlotIndex)))
+  const kt6ActorFaceUpSlots = (efKt6 && efKt6.playerId === state.userId && (kt6Phase === 'selectDiscard' || kt6Phase === 'confirmShuffle' || kt6Phase === 'noDiscardConfirm') && Number.isFinite(Number(efKt6?.cardXSlotIndex)))
     ? [Number(efKt6.cardXSlotIndex)]
     : [];
   const kt6DisplayFaceUpSlots = Array.from(new Set([...kt6FaceUpSlots, ...kt6ActorFaceUpSlots]));
