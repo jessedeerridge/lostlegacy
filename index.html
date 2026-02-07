@@ -3731,7 +3731,6 @@ function subscribeRuinMoveEvent(){
       animateMoveFromPlayedToRuin(fromPid, fromPlayedIndex, slotIndex, {
         faceUp: true,
         cardValue: String(cardValue ?? ''),
-        preserveSource: true,
       });
       return;
     }
@@ -7923,7 +7922,6 @@ async function handleKt6DiscardDrop(fromPlayerId, fromPlayedIndex){
     fromPlayedIndex,
     byPlayerId: state.userId,
   });
-  await sleep(RUIN_MOVE_ANIM_MS);
 
   const rem = await runTransaction(playedRef, (arr) => {
     const src = Array.isArray(arr) ? [...arr] : [];
@@ -7947,6 +7945,8 @@ async function handleKt6DiscardDrop(fromPlayerId, fromPlayedIndex){
     });
     return false;
   }
+
+  await sleep(RUIN_MOVE_ANIM_MS);
 
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   await runTransaction(ruinsRef, (ruins) => {
