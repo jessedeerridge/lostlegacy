@@ -3693,6 +3693,7 @@ function subscribeRuinMoveEvent(){
     const mode = ev.mode || null;
     const fromPlayedIndex = Number(ev.fromPlayedIndex);
     const revealToPlayerId = String(ev.revealToPlayerId || '');
+    const byPlayerId = String(ev.byPlayerId || '');
 
     if (!fromPid) return;
     if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played' && mode !== 'kt6Deck' && mode !== 'kt6DiscardPlayed') return;
@@ -3726,9 +3727,11 @@ function subscribeRuinMoveEvent(){
       return;
     }
     if (mode === 'kt6DiscardPlayed'){
+      if (byPlayerId && byPlayerId === state.userId) return;
       animateMoveFromPlayedToRuin(fromPid, fromPlayedIndex, slotIndex, {
         faceUp: true,
         cardValue: String(cardValue ?? ''),
+        preserveSource: true,
       });
       return;
     }
@@ -5008,6 +5011,7 @@ async function emitRuinMoveEvent(fromPlayerId, cardValue, slotIndex, mode, extra
     mode: mode || null,
     fromPlayedIndex: Number.isFinite(Number(ext.fromPlayedIndex)) ? Number(ext.fromPlayedIndex) : null,
     revealToPlayerId: ext.revealToPlayerId ? String(ext.revealToPlayerId) : null,
+    byPlayerId: ext.byPlayerId ? String(ext.byPlayerId) : null,
     at: Date.now()
   });
 }
@@ -6419,7 +6423,7 @@ async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex, opt
     const cr = cardEl.getBoundingClientRect();
     startX = cr.left + cr.width / 2;
     startY = cr.top + cr.height / 2;
-    cardEl.classList.add('drag-source-hidden');
+    if (!options?.preserveSource) cardEl.classList.add('drag-source-hidden');
   } else {
     const rowAnchor = getPlayedRowAnchorEl(playerId);
     if (rowAnchor){
@@ -7897,17 +7901,11 @@ async function handleKt6DiscardDrop(fromPlayerId, fromPlayedIndex){
   if (!Number.isFinite(slotIndex)) return false;
 
   const playedRef = ref(db, `rooms/${state.roomCode}/played/${fromPlayerId}`);
-  let removedValue = null;
-
-  const rem = await runTransaction(playedRef, (arr) => {
-    const src = Array.isArray(arr) ? [...arr] : [];
-    const idx = Math.max(0, Math.min(src.length - 1, Number(fromPlayedIndex || 0)));
-    if (!src.length || idx >= src.length) return src;
-    removedValue = src.splice(idx, 1)[0];
-    return src;
-  }, { applyLocally:false });
-
-  if (!rem.committed || removedValue == null) return false;
+  const playedSnap = await get(playedRef);
+  const playedArr = Array.isArray(playedSnap.val()) ? playedSnap.val() : [];
+  const idx = Math.max(0, Math.min(playedArr.length - 1, Number(fromPlayedIndex || 0)));
+  const removedValue = (playedArr.length && idx >= 0 && idx < playedArr.length) ? playedArr[idx] : null;
+  if (removedValue == null) return false;
 
   await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
     ...ef,
@@ -7921,8 +7919,34 @@ async function handleKt6DiscardDrop(fromPlayerId, fromPlayedIndex){
     fromPlayedIndex: Number(fromPlayedIndex),
   });
 
-  await emitRuinMoveEvent(fromPlayerId, removedValue, slotIndex, 'kt6DiscardPlayed', { fromPlayedIndex });
+  await emitRuinMoveEvent(fromPlayerId, removedValue, slotIndex, 'kt6DiscardPlayed', {
+    fromPlayedIndex,
+    byPlayerId: state.userId,
+  });
   await sleep(RUIN_MOVE_ANIM_MS);
+
+  const rem = await runTransaction(playedRef, (arr) => {
+    const src = Array.isArray(arr) ? [...arr] : [];
+    const txIdx = Math.max(0, Math.min(src.length - 1, Number(fromPlayedIndex || 0)));
+    if (!src.length || txIdx >= src.length) return src;
+    if (String(src[txIdx]) !== String(removedValue)) return src;
+    src.splice(txIdx, 1);
+    return src;
+  }, { applyLocally:false });
+  if (!rem.committed){
+    await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+      ...ef,
+      phase: 'selectDiscard',
+      at: Date.now(),
+      selectedSlots: [],
+      hintSlots: [slotIndex],
+      faceUpSlots: [],
+      cardYValue: null,
+      cardYFromPlayerId: null,
+      fromPlayedIndex: null,
+    });
+    return false;
+  }
 
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   await runTransaction(ruinsRef, (ruins) => {
