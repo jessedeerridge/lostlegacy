@@ -6386,9 +6386,8 @@ async function animateMoveFromDeckToRuin(slotIndex, cardValue, { faceUp = false 
   const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
 
   const flyer = document.createElement('div');
-  flyer.className = 'back-flyer';
+  flyer.className = faceUp ? 'front-flyer face-flyer played-face-flyer' : 'back-flyer';
   if (faceUp){
-    flyer.classList.add('exploration-front');
     setCardFace(flyer, cardValue);
   }
   flyer.style.left = `${startX}px`;
