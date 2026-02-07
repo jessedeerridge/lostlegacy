@@ -293,6 +293,15 @@
     transform-style:preserve-3d;
     backface-visibility:hidden;
   }
+  .front-flyer.played-face-flyer{
+    width:42px;
+    height:62px;
+    border-radius:10px;
+    border:1px solid rgba(0,0,0,.2);
+    box-shadow:0 18px 40px rgba(0,0,0,.28);
+    --card-title-size:7.6px;
+    --card-reading-size:6.4px;
+  }
 
   @keyframes explorationReopen{
     0%{ transform:translate(-50%,0) rotate(var(--rot,0deg)) rotateY(0deg); }
@@ -6412,15 +6421,22 @@ async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex, opt
     startY = cr.top + cr.height / 2;
     cardEl.classList.add('drag-source-hidden');
   } else {
-    const anchor = getPlayerAnchorEl(playerId);
-    if (anchor){
-      const sr = anchor.getBoundingClientRect();
-      startX = sr.left + sr.width/2;
-      startY = sr.top + sr.height/2;
+    const rowAnchor = getPlayedRowAnchorEl(playerId);
+    if (rowAnchor){
+      const rr = rowAnchor.getBoundingClientRect();
+      startX = rr.left + rr.width/2;
+      startY = rr.top + rr.height/2;
     } else {
-      const pc = playerCircle.getBoundingClientRect();
-      startX = pc.left + pc.width/2;
-      startY = pc.top + pc.height/2;
+      const anchor = getPlayerAnchorEl(playerId);
+      if (anchor){
+        const sr = anchor.getBoundingClientRect();
+        startX = sr.left + sr.width/2;
+        startY = sr.top + sr.height/2;
+      } else {
+        const pc = playerCircle.getBoundingClientRect();
+        startX = pc.left + pc.width/2;
+        startY = pc.top + pc.height/2;
+      }
     }
   }
 
@@ -6428,7 +6444,7 @@ async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex, opt
 
   const flyer = document.createElement('div');
   const faceUp = !!options?.faceUp;
-  flyer.className = faceUp ? 'back-flyer exploration-front' : 'back-flyer';
+  flyer.className = faceUp ? 'front-flyer face-flyer played-face-flyer' : 'back-flyer';
   if (faceUp){
     const value = (options?.cardValue != null) ? options.cardValue : (cardEl?.dataset?.value || '');
     setCardFace(flyer, value);
@@ -7892,6 +7908,18 @@ async function handleKt6DiscardDrop(fromPlayerId, fromPlayedIndex){
   }, { applyLocally:false });
 
   if (!rem.committed || removedValue == null) return false;
+
+  await set(ref(db, `rooms/${state.roomCode}/effectKt6`), {
+    ...ef,
+    phase: 'selectDiscard',
+    at: Date.now(),
+    selectedSlots: [Number(ef.cardXSlotIndex), slotIndex],
+    hintSlots: [slotIndex],
+    faceUpSlots: [slotIndex],
+    cardYValue: String(removedValue),
+    cardYFromPlayerId: fromPlayerId,
+    fromPlayedIndex: Number(fromPlayedIndex),
+  });
 
   await emitRuinMoveEvent(fromPlayerId, removedValue, slotIndex, 'kt6DiscardPlayed', { fromPlayedIndex });
   await sleep(RUIN_MOVE_ANIM_MS);
