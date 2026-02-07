@@ -3337,7 +3337,9 @@ function subscribeEffectKt6(){
       renderHands();
     }
 
-    ui.effectKt6TargetSlot = selectingDiscard ? Number(raw?.targetSlotIndex) : null;
+    ui.effectKt6TargetSlot = selectingDiscard
+      ? Number(raw?.cardYSlotIndex ?? raw?.targetSlotIndex)
+      : null;
 
     renderHands();
     runKt6PhaseAnimations(raw);
