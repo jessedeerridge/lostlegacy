@@ -2147,6 +2147,58 @@ const deckCardState = Object.fromEntries(
   DECK_SETS.flatMap((set) => Object.keys(set.cardPool).map((cardKey) => [cardKey, true]))
 );
 
+function snapshotHelpConfig(){
+  return {
+    setState: { ...deckSetState },
+    cardState: { ...deckCardState },
+  };
+}
+
+function applyHelpConfig(rawConfig){
+  if (!rawConfig || typeof rawConfig !== 'object') return false;
+
+  const nextSetState = rawConfig.setState && typeof rawConfig.setState === 'object'
+    ? rawConfig.setState
+    : null;
+  const nextCardState = rawConfig.cardState && typeof rawConfig.cardState === 'object'
+    ? rawConfig.cardState
+    : null;
+  if (!nextSetState || !nextCardState) return false;
+
+  DECK_SETS.forEach((set) => {
+    if (set.id in nextSetState){
+      deckSetState[set.id] = !!nextSetState[set.id];
+    }
+    Object.keys(set.cardPool).forEach((cardKey) => {
+      if (cardKey in nextCardState){
+        deckCardState[cardKey] = !!nextCardState[cardKey];
+      }
+    });
+  });
+
+  if (deckCardState['5'] && deckCardState['kt5']) syncExclusiveFives('starship');
+  return true;
+}
+
+async function saveHelpConfig(){
+  if (!state.isHost || !state.roomCode) return;
+  await set(ref(db, `rooms/${state.roomCode}/helpConfig`), snapshotHelpConfig());
+}
+
+function syncHelpConfigFromRoom(){
+  const remoteHelpConfig = state.room?.helpConfig;
+  if (!remoteHelpConfig){
+    if (state.isHost){
+      void saveHelpConfig();
+    }
+    return;
+  }
+  const applied = applyHelpConfig(remoteHelpConfig);
+  if (applied && !helpBackdrop.classList.contains('hidden')){
+    renderHelpList();
+  }
+}
+
 function syncExclusiveFives(preferred = 'starship'){
   if (preferred === 'starship' && deckCardState['5']){
     deckCardState['kt5'] = false;
@@ -2204,6 +2256,7 @@ function renderHelpList(){
           if (key === '5' && deckCardState[key]) syncExclusiveFives('starship');
           if (key === 'kt5' && deckCardState[key]) syncExclusiveFives('skygarden');
           renderHelpList();
+          void saveHelpConfig();
         });
         row.appendChild(card);
       });
@@ -2221,6 +2274,7 @@ function renderHelpList(){
       toggle.setAttribute('aria-pressed', isEnabled ? 'true' : 'false');
       toggle.classList.toggle('is-disabled', !isEnabled);
       renderHelpList();
+      void saveHelpConfig();
     });
 
     section.appendChild(grid);
@@ -3117,6 +3171,7 @@ function subscribeRoom(){
   const roomRef = ref(db, `rooms/${state.roomCode}`);
   onValue(roomRef, snap => {
     state.room = snap.val() || {};
+    syncHelpConfigFromRoom();
     const waiting = (!state.isHost && !state.room.maxPlayers);
     hostSelectingPop.classList.toggle('hidden', !waiting);
     syncSeatUI();
@@ -3128,6 +3183,7 @@ function subscribeHostState(){
   onValue(hostRef, snap => {
     const hostId = snap.val();
     state.isHost = (hostId === state.userId);
+    syncHelpConfigFromRoom();
     updateHostUI();
     syncSeatUI();
   });
@@ -9373,7 +9429,7 @@ function renderPlayerCircle(players){
   }
 
   const n = players.length;
-  const radius = 70;
+  const radius = 90;
   const step = (2 * Math.PI) / n;
   const anchorAngle = Math.PI / 2;
   const meIndex = players.findIndex(p => p.id === state.userId);
@@ -9576,7 +9632,7 @@ function renderPlayerCircle(players){
         }
       }
 
-      const parallel = (p.id !== state.userId) && (slice.length === 2 || slice.length === 3 || slice.length === 4);
+      const parallel = (p.id !== state.userId) && (slice.length === 2 || slice.length === 3 || slice.length === 4 || slice.length === 5 || slice.length === 6 || slice.length === 7);
 
       if (parallel){
         row.style.transform =
