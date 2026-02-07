@@ -3717,7 +3717,10 @@ function subscribeRuinMoveEvent(){
       return;
     }
     if (mode === 'kt6DiscardPlayed'){
-      animateMoveFromPlayedToRuin(fromPid, fromPlayedIndex, slotIndex);
+      animateMoveFromPlayedToRuin(fromPid, fromPlayedIndex, slotIndex, {
+        faceUp: true,
+        cardValue: String(cardValue ?? ''),
+      });
       return;
     }
 
@@ -6396,7 +6399,7 @@ async function animateMoveFromDeckToRuin(slotIndex, cardValue, { faceUp = false 
   flyer.remove();
 }
 
-async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex){
+async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex, options = {}){
   let startX;
   let startY;
   const cardEl = Number.isFinite(Number(playedIndex))
@@ -6424,7 +6427,12 @@ async function animateMoveFromPlayedToRuin(playerId, playedIndex, slotIndex){
   const { x:endX, y:endY } = getRuinSlotCenterByIndex(slotIndex);
 
   const flyer = document.createElement('div');
-  flyer.className = 'back-flyer';
+  const faceUp = !!options?.faceUp;
+  flyer.className = faceUp ? 'back-flyer exploration-front' : 'back-flyer';
+  if (faceUp){
+    const value = (options?.cardValue != null) ? options.cardValue : (cardEl?.dataset?.value || '');
+    setCardFace(flyer, value);
+  }
   flyer.style.left = `${startX}px`;
   flyer.style.top  = `${startY}px`;
   flyer.style.transform = 'translate(-50%,-50%) rotate(-6deg) scale(1)';
@@ -7820,6 +7828,7 @@ async function resolveKt6(playerId){
     cardYFromPlayerId: null,
     selectedSlots: [],
     hintSlots: [cardXSlotIndex],
+    faceUpSlots: [],
   });
 
   await emitRuinMoveEvent(playerId, drawn, cardXSlotIndex, 'kt6Deck', { revealToPlayerId: playerId });
@@ -7858,6 +7867,7 @@ async function resolveKt6(playerId){
     selectedSlots: [],
     hintSlots: [cardYSlotIndex],
     fromPlayedIndex: null,
+    faceUpSlots: [],
   });
 }
 
@@ -7905,6 +7915,7 @@ async function handleKt6DiscardDrop(fromPlayerId, fromPlayedIndex){
     fromPlayedIndex: Number(fromPlayedIndex),
     selectedSlots: [Number(ef.cardXSlotIndex), slotIndex],
     hintSlots: [slotIndex],
+    faceUpSlots: [slotIndex],
   });
 
   return true;
@@ -7947,6 +7958,7 @@ async function confirmKt6Shuffle(doShuffle){
       fromPlayedIndex: null,
       selectedSlots: [],
       hintSlots: [slotY],
+      faceUpSlots: [],
     });
     return;
   }
@@ -7957,6 +7969,7 @@ async function confirmKt6Shuffle(doShuffle){
     at: Date.now(),
     selectedSlots: [slotX, slotY],
     hintSlots: [slotY],
+    faceUpSlots: [],
   });
 
   await sleep(KT7_COLLECT_ANIM_MS);
@@ -7982,6 +7995,7 @@ async function confirmKt6Shuffle(doShuffle){
     selectedSlots: [slotX, slotY],
     hintSlots: [slotY],
     swapped: shouldSwap,
+    faceUpSlots: [],
   });
 
   await sleep(KT7_RETURN_ANIM_MS);
@@ -8834,8 +8848,13 @@ function renderRuinsArea(){
   const mineKt7Selecting = !!(kt7Mine && kt7Phase === 'selectPair');
   const mineKt7Inspecting = !!(kt7Mine && kt7Phase === 'inspectPick');
   const efKt6 = state.effectKt6;
-  const mineKt6SelectingDiscard = !!(efKt6 && efKt6.playerId === state.userId && efKt6.phase === 'selectDiscard');
-  const kt6HintSlots = Array.isArray(efKt6?.hintSlots) ? efKt6.hintSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  const kt6Phase = String(efKt6?.phase || '');
+  const mineKt6SelectingDiscard = !!(efKt6 && efKt6.playerId === state.userId && kt6Phase === 'selectDiscard');
+  const kt6SelectedSlots = Array.isArray(efKt6?.selectedSlots) ? efKt6.selectedSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  const kt6FaceUpSlots = Array.isArray(efKt6?.faceUpSlots) ? efKt6.faceUpSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  const kt6HintSlots = mineKt6SelectingDiscard
+    ? (Array.isArray(efKt6?.hintSlots) ? efKt6.hintSlots.map(Number).filter(n => Number.isFinite(n)) : [])
+    : [];
 
   if (mine6Selecting || mine7Picking || mine7Placing || mineKt3Picking || mineKt3Placing || mineKt7Selecting || mineKt7Inspecting || mineKt6SelectingDiscard) wrap.classList.add('drop-enabled');
 
@@ -8867,6 +8886,10 @@ function renderRuinsArea(){
     if (revealedValue != null && String(revealedValue) === String(item)){
       card.classList.add('exploration-front');
       setCardFace(card, item);
+    }
+    if (kt6FaceUpSlots.includes(i)){
+      card.classList.add('exploration-front');
+      setCardFace(card, item?.v ?? item);
     }
 
     if (mine7Picking){
@@ -8913,6 +8936,9 @@ function renderRuinsArea(){
       card.classList.add('effect7-ghost-hidden');
     }
     if ((kt5Phase === 'collectingAll' || kt5Phase === 'returningAll') && kt5SelectedSlots.includes(i)){
+      card.classList.add('effect7-ghost-hidden');
+    }
+    if ((kt6Phase === 'collectingPair' || kt6Phase === 'returningPair') && kt6SelectedSlots.includes(i)){
       card.classList.add('effect7-ghost-hidden');
     }
     if (Array.isArray(ui.kt7ReturnAnimatingSlots) && ui.kt7ReturnAnimatingSlots.includes(i)){
