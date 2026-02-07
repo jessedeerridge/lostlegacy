@@ -2443,6 +2443,17 @@ function hideCenterNotice(){
 function getActionHintData(){
   const myId = state.userId;
 
+  const kt2 = state.effectKt2;
+  if (kt2){
+    const mine = kt2.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '捨て札のカードを選んで、山札に戻してください。'
+        : '2 捨て札のカードを選んで、山札に戻す。'
+    };
+  }
+
   const ef2 = state.effect2;
   if (ef2){
     const mine = ef2.playerId === myId;
@@ -2466,6 +2477,16 @@ function getActionHintData(){
   }
 
   const ef4 = state.effect4;
+  if (ef4 && String(ef4.mode || 'normal') === 'kt4'){
+    const mine = ef4.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '見たいカードを選んでください。'
+        : '4 全員の手札を混ぜた後、プレイヤーの手札を見る。'
+    };
+  }
+
   if (ef4 && String(ef4.mode || 'normal') !== 'kt4'){
     const mine = ef4.playerId === myId;
     return {
@@ -2488,6 +2509,27 @@ function getActionHintData(){
   }
 
   const ef7 = state.effect7;
+  if (ef7 && String(ef7.mode || 'normal') === 'kt3'){
+    const mine = ef7.playerId === myId;
+    if (!mine) return { mine, text: '3 遺跡から2枚見て、好きなカードを取る。その後、手札のカードを1枚遺跡に置く。' };
+    if (ef7.phase === 'placeBack') return { mine, text: '好きなカードを1枚とった後で、どちらかを遺跡に置いてください。' };
+    return { mine, text: '遺跡から2枚まで見たいカードを選んでください。' };
+  }
+
+  if (ef7 && String(ef7.mode || 'normal') === 'kt5'){
+    return {
+      mine: false,
+      text: '5 空中庭園と遺跡カードを全て混ぜて、遺跡に置く。'
+    };
+  }
+
+  if (ef7 && String(ef7.mode || 'normal') === 'kt7'){
+    const mine = ef7.playerId === myId;
+    if (!mine) return { mine, text: '7 遺跡のカード2枚を見ずに混ぜる。その後、好きな遺跡のカードを見る。' };
+    if (ef7.phase === 'inspectPick') return { mine, text: '遺跡から見たいカードを選んでください。' };
+    return { mine, text: '混ぜる遺跡のカードを2枚選んでください。' };
+  }
+
   if (ef7 && !['kt3', 'kt5', 'kt7'].includes(String(ef7.mode || 'normal'))){
     const mine = ef7.playerId === myId;
     if (!mine) return { mine, text: '7 遺跡から1枚とって、手札のカードと交換できる。' };
@@ -2495,7 +2537,28 @@ function getActionHintData(){
     return { mine, text: '遺跡から1枚選んでください。' };
   }
 
+  const kt6 = state.effectKt6;
+  if (kt6){
+    const mine = kt6.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '捨て札のカードを選んで遺跡に置いてください。'
+        : '6 山札の一番上のカードと捨て札の1枚を選んで、2枚を混ぜて遺跡に置く。'
+    };
+  }
+
   const ef8 = state.effect8;
+  if (ef8 && String(ef8.mode || 'normal') === 'kt8'){
+    const mine = ef8.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '数字を宣言して、見たいカードを選んでください。'
+        : '数字を宣言して、カードを見る。当たっていればそのプレイヤーを脱落させる。'
+    };
+  }
+
   if (ef8 && String(ef8.mode || 'normal') !== 'kt8'){
     const mine = ef8.playerId === myId;
     if (!mine) return { mine, text: '8 プレイヤーの手札をとって、交換できる。' };
