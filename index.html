@@ -806,7 +806,7 @@
     filter:grayscale(1);
   }
 
-  /* 遺跡エリア（2x3）：画面中心(=playerCircle中心)に固定。center-areaを動かしてもここは動かさない */
+  /* 遺跡エリア（2x3 + 追加1枠）：画面中心(=playerCircle中心)に固定。center-areaを動かしてもここは動かさない */
   .ruins-area{
     position:absolute;
     inset:0;
@@ -923,13 +923,14 @@
     opacity:0;
   }
 
-  /* 位置：2行×3列（中心＝playerCircle中心＝50%/50%） */
+  /* 位置：2行×3列 + 7枠目（左上の上） */
   .ruins-slot[data-i="0"], .ruins-card[data-i="0"]{ left:calc(50% - var(--ru-gap-x)); top:calc(50% - var(--ru-half-y) + var(--ru-shift-y)); }
   .ruins-slot[data-i="1"], .ruins-card[data-i="1"]{ left:50%;                           top:calc(50% - var(--ru-half-y) + var(--ru-shift-y)); }
   .ruins-slot[data-i="2"], .ruins-card[data-i="2"]{ left:calc(50% + var(--ru-gap-x)); top:calc(50% - var(--ru-half-y) + var(--ru-shift-y)); }
   .ruins-slot[data-i="3"], .ruins-card[data-i="3"]{ left:calc(50% - var(--ru-gap-x)); top:calc(50% + var(--ru-half-y) + var(--ru-shift-y)); }
   .ruins-slot[data-i="4"], .ruins-card[data-i="4"]{ left:50%;                           top:calc(50% + var(--ru-half-y) + var(--ru-shift-y)); }
   .ruins-slot[data-i="5"], .ruins-card[data-i="5"]{ left:calc(50% + var(--ru-gap-x)); top:calc(50% + var(--ru-half-y) + var(--ru-shift-y)); }
+  .ruins-slot[data-i="6"], .ruins-card[data-i="6"]{ left:calc(50% - var(--ru-gap-x)); top:calc(50% - var(--ru-half-y) - var(--ru-gap-y) + var(--ru-shift-y)); }
 
   /* ===== ③/④：矢印（点線）オーバーレイ ===== */
   .effect-arrow-overlay{
@@ -1947,6 +1948,7 @@ function createBackGhost(){
 const RUINS_SHIFT_Y = 14;
 const RUINS_GAP_X = 54;
 const RUINS_GAP_Y = 74;
+const RUINS_SLOT_COUNT = 7;
 
 const EFFECT4_X_GLOBAL_MS = 1600;
 const EFFECT4_X_AFTER_CLOSE_DELAY_MS = 1500;
@@ -3084,18 +3086,18 @@ function updateDeckPosition(){
   deckPile.style.top = `${y - pc.top}px`;
 }
 
-/* ===== 遺跡：常に6スロット扱い（後方互換：短い配列もOK） ===== */
+/* ===== 遺跡：常に7スロット扱い（後方互換：短い配列もOK） ===== */
 function getRuinsSlots(){
-  const slots = new Array(6).fill(null);
+  const slots = new Array(RUINS_SLOT_COUNT).fill(null);
   const src = Array.isArray(state.ruins) ? state.ruins : [];
-  for (let i=0;i<6;i++){
+  for (let i=0;i<RUINS_SLOT_COUNT;i++){
     const v = src[i];
     slots[i] = (v === undefined ? null : v);
   }
   return slots;
 }
 function firstEmptyRuinSlotIndex(slots){
-  for (let i=0;i<6;i++){
+  for (let i=0;i<RUINS_SLOT_COUNT;i++){
     if (!slots[i]) return i;
   }
   return null;
@@ -5937,10 +5939,7 @@ async function animateGlobalOneReveal(targetPlayerId){
 
 /* ★遺跡：スロット中心座標（playerCircle中心基準＝遺跡は固定） */
 function getRuinSlotCenterByIndex(slotIndex){
-  const idx = Math.max(0, Math.min(5, Number(slotIndex||0)));
-  const row = Math.floor(idx / 3);
-  const col = idx % 3;
-
+  const idx = Math.max(0, Math.min(RUINS_SLOT_COUNT - 1, Number(slotIndex||0)));
   const pc = playerCircle.getBoundingClientRect();
   const cx = pc.left + pc.width/2;
   const cy = pc.top + pc.height/2;
@@ -5948,6 +5947,15 @@ function getRuinSlotCenterByIndex(slotIndex){
   const gapX = RUINS_GAP_X;
   const gapY = RUINS_GAP_Y;
 
+  if (idx === 6){
+    return {
+      x: cx - gapX,
+      y: cy - (1.5 * gapY) + RUINS_SHIFT_Y,
+    };
+  }
+
+  const row = Math.floor(idx / 3);
+  const col = idx % 3;
   const x = cx + (col - 1) * gapX;
   const y = cy + (row - 0.5) * gapY + RUINS_SHIFT_Y;
   return { x, y };
@@ -5974,7 +5982,7 @@ async function waitForRuinCard(slotIndex, timeoutMs = 600){
 /* ★⑦：遺跡→手札（使用者の画面だけ） */
 
 async function animateKt7PairCollectToCenter(slotIndexes = []){
-  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 5).slice(0,2);
+  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n < RUINS_SLOT_COUNT).slice(0,2);
   if (!idxs.length) return;
 
   const pc = playerCircle.getBoundingClientRect();
@@ -6022,7 +6030,7 @@ async function animateKt7PairCollectToCenter(slotIndexes = []){
 }
 
 async function animateKt7PairReturnFromCenter(slotIndexes = [], swapped = false){
-  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 5).slice(0,2);
+  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n < RUINS_SLOT_COUNT).slice(0,2);
   if (!idxs.length) return;
 
   ui.kt7ReturnAnimatingSlots = [...idxs];
@@ -6139,7 +6147,7 @@ function runKt7PhaseAnimations(raw){
 }
 
 async function animateKt5CollectToCenter(slotIndexes = []){
-  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 5);
+  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n < RUINS_SLOT_COUNT);
   if (!idxs.length) return;
 
   const pc = playerCircle.getBoundingClientRect();
@@ -6185,7 +6193,7 @@ async function animateKt5CollectToCenter(slotIndexes = []){
 }
 
 async function animateKt5ReturnFromCenter(slotIndexes = []){
-  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 5);
+  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n < RUINS_SLOT_COUNT);
   if (!idxs.length) return;
 
   ui.kt7ReturnAnimatingSlots = [...idxs];
@@ -6889,7 +6897,7 @@ async function checkAndHandleKtXElimination(playerId, { seq = null } = {}){
       const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
       await runTransaction(ruinsRef, (ruins) => {
         const slots = Array.isArray(ruins) ? [...ruins] : [];
-        for (let i=0;i<6;i++){
+        for (let i=0;i<RUINS_SLOT_COUNT;i++){
           if (slots[i] === undefined) slots[i] = null;
         }
 
@@ -6914,10 +6922,10 @@ async function placeCardIntoRuins(playerId, cardValue, { skipEvent = false, even
   let slotIndex = null;
   const res = await runTransaction(ruinsRef, (ruins) => {
     const slots = Array.isArray(ruins) ? [...ruins] : [];
-    for (let i=0;i<6;i++){
+    for (let i=0;i<RUINS_SLOT_COUNT;i++){
       if (slots[i] === undefined) slots[i] = null;
     }
-    for (let i=0;i<6;i++){
+    for (let i=0;i<RUINS_SLOT_COUNT;i++){
       if (!slots[i]){
         slotIndex = i;
         slots[i] = { v: String(cardValue ?? ''), by: playerId, at: Date.now() };
@@ -6979,8 +6987,8 @@ async function resolveOneReveal(targetPlayerId, cardIndex, removedValue, reveali
       const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
       await runTransaction(ruinsRef, (ruins) => {
         const src = Array.isArray(ruins) ? [...ruins] : [];
-        const slots = new Array(6).fill(null);
-        for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+        const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+        for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
         if (slots[slotIndex]) return slots;
         slots[slotIndex] = { v: String(value), by: targetPlayerId, at: Date.now() };
         return slots;
@@ -7133,8 +7141,8 @@ async function resolveEffect4XReveal(targetPlayerId, cardIndex){
       const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
       await runTransaction(ruinsRef, (ruins) => {
         const src = Array.isArray(ruins) ? [...ruins] : [];
-        const slots = new Array(6).fill(null);
-        for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+        const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+        for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
         if (slots[slotIndex]) return slots;
         slots[slotIndex] = { v: String(value), by: targetPlayerId, at: Date.now() };
         return slots;
@@ -7675,8 +7683,8 @@ async function handleEffect6Drop(cardIndex){
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   await runTransaction(ruinsRef, (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
     if (slots[slotIndex]) return slots;
     slots[slotIndex] = { v: String(removedValue), by: myId, at: Date.now() };
     return slots;
@@ -7731,7 +7739,7 @@ async function resolveKt7(playerId){
 
   const slots = getRuinsSlots();
   const filled = [];
-  for (let i=0;i<6;i++) if (slots[i]) filled.push(i);
+  for (let i=0;i<RUINS_SLOT_COUNT;i++) if (slots[i]) filled.push(i);
   if (filled.length < 2){
     await advanceTurnToNextPlayer();
     return;
@@ -7763,7 +7771,7 @@ async function handleKt7Select(slotIndex){
   if (!ef || ef.playerId !== state.userId || ef.phase !== 'selectPair') return;
 
   const idx = Number(slotIndex);
-  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+  if (!Number.isFinite(idx) || idx < 0 || idx >= RUINS_SLOT_COUNT) return;
 
   const selectable = Array.isArray(ef.selectableSlots) ? ef.selectableSlots.map(Number) : [];
   if (!selectable.includes(idx)) return;
@@ -7798,8 +7806,8 @@ async function handleKt7Select(slotIndex){
 
   await runTransaction(ruinsRef, (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
 
     const [a,b] = nextSelected;
     if (!slots[a] || !slots[b]) return slots;
@@ -7827,7 +7835,7 @@ async function handleKt7Select(slotIndex){
   const currentRaw = ruinsSnap.val();
   const currentSlots = Array.isArray(currentRaw) ? currentRaw : [];
   const inspectSlots = [];
-  for (let i=0;i<6;i++) if (currentSlots[i]) inspectSlots.push(i);
+  for (let i=0;i<RUINS_SLOT_COUNT;i++) if (currentSlots[i]) inspectSlots.push(i);
 
   await set(ref(db, `rooms/${state.roomCode}/effect7`), {
     ...ef,
@@ -7850,7 +7858,7 @@ async function handleKt7Inspect(slotIndex){
   if (!ef || ef.playerId !== state.userId || ef.phase !== 'inspectPick') return;
 
   const idx = Number(slotIndex);
-  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+  if (!Number.isFinite(idx) || idx < 0 || idx >= RUINS_SLOT_COUNT) return;
 
   const selectable = Array.isArray(ef.selectableSlots) ? ef.selectableSlots.map(Number) : [];
   if (!selectable.includes(idx)) return;
@@ -7923,8 +7931,8 @@ async function resolveKt6(playerId){
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   await runTransaction(ruinsRef, (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
     if (slots[cardXSlotIndex]) return slots;
     slots[cardXSlotIndex] = { v: String(drawn), by: playerId, at: Date.now() };
     return slots;
@@ -8057,8 +8065,8 @@ async function handleKt6DiscardDrop(fromPlayerId, fromPlayedIndex){
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   await runTransaction(ruinsRef, (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
     if (slots[slotIndex]) return slots;
     slots[slotIndex] = { v: String(removedValue), by: fromPlayerId, at: Date.now() };
     return slots;
@@ -8113,8 +8121,8 @@ async function confirmKt6Shuffle(doShuffle){
 
     await runTransaction(ref(db, `rooms/${state.roomCode}/ruins`), (ruins) => {
       const src = Array.isArray(ruins) ? [...ruins] : [];
-      const slots = new Array(6).fill(null);
-      for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+      const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+      for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
       slots[slotY] = null;
       return slots;
     }, { applyLocally:false });
@@ -8147,8 +8155,8 @@ async function confirmKt6Shuffle(doShuffle){
   const shouldSwap = Math.random() < 0.5;
   await runTransaction(ref(db, `rooms/${state.roomCode}/ruins`), (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
     if (!slots[slotX] || !slots[slotY]) return slots;
     if (shouldSwap){
       const tmp = slots[slotX];
@@ -8226,8 +8234,8 @@ async function resolveKt5(playerId){
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   await runTransaction(ruinsRef, (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
     if (slots[targetSlotIndex]) return slots;
     slots[targetSlotIndex] = { v: 'kt5', by: playerId, at: Date.now() };
     return slots;
@@ -8235,7 +8243,7 @@ async function resolveKt5(playerId){
 
   const postSlots = getRuinsSlots();
   const filledSlots = [];
-  for (let i=0;i<6;i++) if (postSlots[i]) filledSlots.push(i);
+  for (let i=0;i<RUINS_SLOT_COUNT;i++) if (postSlots[i]) filledSlots.push(i);
 
   await set(ref(db, `rooms/${state.roomCode}/effect7`), {
     id: effectId,
@@ -8253,19 +8261,19 @@ async function resolveKt5(playerId){
 
   await runTransaction(ruinsRef, (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
     const entries = [];
-    for (let i=0;i<6;i++) if (slots[i]) entries.push(slots[i]);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) if (slots[i]) entries.push(slots[i]);
     for (let i=entries.length-1;i>0;i--){
       const j = Math.floor(Math.random() * (i + 1));
       const tmp = entries[i];
       entries[i] = entries[j];
       entries[j] = tmp;
     }
-    const next = new Array(6).fill(null);
+    const next = new Array(RUINS_SLOT_COUNT).fill(null);
     let cur = 0;
-    for (let i=0;i<6;i++){
+    for (let i=0;i<RUINS_SLOT_COUNT;i++){
       if (slots[i]){
         next[i] = entries[cur++] || null;
       }
@@ -8299,7 +8307,7 @@ async function resolveKt3(playerId){
 
   const slots = getRuinsSlots();
   const filled = [];
-  for (let i=0;i<6;i++) if (slots[i]) filled.push(i);
+  for (let i=0;i<RUINS_SLOT_COUNT;i++) if (slots[i]) filled.push(i);
   if (!filled.length){
     await advanceTurnToNextPlayer();
     return;
@@ -8330,7 +8338,7 @@ async function handleKt3Select(slotIndex){
   if (!ef || ef.playerId !== state.userId || ef.phase !== 'selectRuins') return;
 
   const idx = Number(slotIndex);
-  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+  if (!Number.isFinite(idx) || idx < 0 || idx >= RUINS_SLOT_COUNT) return;
 
   const selectable = Array.isArray(ef.selectableSlots) ? ef.selectableSlots.map(Number) : [];
   if (!selectable.includes(idx)) return;
@@ -8367,7 +8375,7 @@ async function handleKt3Pick(slotIndex){
   if (!ef || ef.playerId !== state.userId || ef.phase !== 'pickRuins') return;
 
   const idx = Number(slotIndex);
-  if (!Number.isFinite(idx) || idx < 0 || idx > 5) return;
+  if (!Number.isFinite(idx) || idx < 0 || idx >= RUINS_SLOT_COUNT) return;
 
   const selected = Array.isArray(ef.selectedSlots) ? ef.selectedSlots.map(Number) : [];
   if (!selected.includes(idx)) return;
@@ -8378,8 +8386,8 @@ async function handleKt3Pick(slotIndex){
 
   const res = await runTransaction(ruinsRef, (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
     if (!slots[idx]) return slots;
     pickedObj = slots[idx];
     slots[idx] = null;
@@ -8424,11 +8432,11 @@ async function handleEffect7Pick(slotIndex){
 
   const res = await runTransaction(ruinsRef, (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
 
     const idx = Number(slotIndex);
-    if (!Number.isFinite(idx) || idx < 0 || idx > 5) return slots;
+    if (!Number.isFinite(idx) || idx < 0 || idx >= RUINS_SLOT_COUNT) return slots;
     if (!slots[idx]) return slots;
 
     pickedObj = slots[idx];
@@ -8502,8 +8510,8 @@ async function handleEffect7Drop(cardIndex){
   const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
   await runTransaction(ruinsRef, (ruins) => {
     const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(6).fill(null);
-    for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
 
     if (slots[slotIndex]) return slots;
 
@@ -8703,8 +8711,8 @@ async function handleKt8GuessSelect(guessedNumber){
       const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
       await runTransaction(ruinsRef, (ruins) => {
         const src = Array.isArray(ruins) ? [...ruins] : [];
-        const slots = new Array(6).fill(null);
-        for (let i=0;i<6;i++) slots[i] = (src[i] === undefined ? null : src[i]);
+        const slots = new Array(RUINS_SLOT_COUNT).fill(null);
+        for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
         if (slots[slotIndex]) return slots;
         slots[slotIndex] = { v: String(revealed), by: targetPlayerId, at: Date.now() };
         return slots;
@@ -9149,7 +9157,7 @@ function renderRuinsArea(){
   const kt7SelectableSlots = Array.isArray(efKt7?.selectableSlots) ? efKt7.selectableSlots.map(Number).filter(n => Number.isFinite(n)) : [];
   const kt5SelectedSlots = Array.isArray(efKt5?.selectedSlots) ? efKt5.selectedSlots.map(Number).filter(n => Number.isFinite(n)) : [];
 
-  for (let i=0;i<6;i++){
+  for (let i=0;i<RUINS_SLOT_COUNT;i++){
     const slot = document.createElement('div');
     slot.className = 'ruins-slot';
     slot.dataset.i = String(i);
@@ -9157,7 +9165,7 @@ function renderRuinsArea(){
     wrap.appendChild(slot);
   }
 
-  for (let i=0;i<6;i++){
+  for (let i=0;i<RUINS_SLOT_COUNT;i++){
     const item = slots[i];
     if (!item) continue;
 
@@ -9746,7 +9754,7 @@ async function dealAllCardsAndInitialDraw(){
   await Promise.all([
     set(ref(db, `rooms/${state.roomCode}/hands`), hands),
     set(ref(db, `rooms/${state.roomCode}/played`), {}),
-    set(ref(db, `rooms/${state.roomCode}/ruins`), new Array(6).fill(null)),
+    set(ref(db, `rooms/${state.roomCode}/ruins`), new Array(RUINS_SLOT_COUNT).fill(null)),
 
     set(ref(db, `rooms/${state.roomCode}/effect2`), null),
     set(ref(db, `rooms/${state.roomCode}/effect3`), null),
