@@ -151,6 +151,11 @@
     z-index:20;
     pointer-events:none;
   }
+  .player-fan .fan-name.takeover-target,
+  .player-tag.takeover-target{
+    cursor:pointer;
+    pointer-events:auto;
+  }
 
   /* ★センターエリア：下に下げて、横長四角に（遺跡など他は動かさない） */
   .center-area{
@@ -2945,6 +2950,7 @@ async function runExplorationPhaseSequence(eventId){
 
 let isRenderingSeatTabs = false;
 let latestPlayers = [];
+let pendingTakeover = null;
 
 let prevIsMyTurn = false;
 let autoDrawInFlight = false;
@@ -8825,6 +8831,112 @@ btnJoin.addEventListener('click', async () => {
   syncSeatUI();
 });
 
+
+
+function showKickDialog(target){
+  if (!target || state.seatedTable !== null) return;
+  pendingTakeover = {
+    seatIndex: Number(target.seatIndex),
+    playerId: String(target.id || ''),
+    playerName: String(target.name || '名無し'),
+  };
+  kickMessage.textContent = `「${pendingTakeover.playerName}」を追い出して着席しますか？`;
+  kickDialog.classList.remove('hidden');
+}
+
+function hideKickDialog(){
+  kickDialog.classList.add('hidden');
+  pendingTakeover = null;
+}
+
+function mergeForTakeover(currentValue, takeoverValue){
+  if (currentValue === undefined) return takeoverValue;
+  if (Array.isArray(currentValue) && Array.isArray(takeoverValue)) return takeoverValue;
+  if (currentValue && takeoverValue && typeof currentValue === 'object' && typeof takeoverValue === 'object'){
+    return { ...currentValue, ...takeoverValue };
+  }
+  return takeoverValue;
+}
+
+function replacePlayerRefDeep(node, fromId, toId, usersNode = null){
+  if (Array.isArray(node)){
+    for (let i = 0; i < node.length; i += 1){
+      const v = node[i];
+      if (typeof v === 'string' && v === fromId) node[i] = toId;
+      else if (v && typeof v === 'object') replacePlayerRefDeep(v, fromId, toId, usersNode);
+    }
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
+
+  const keys = Object.keys(node);
+  if (node !== usersNode && keys.includes(fromId)){
+    const takeoverValue = node[fromId];
+    if (toId in node) node[toId] = mergeForTakeover(node[toId], takeoverValue);
+    else node[toId] = takeoverValue;
+    delete node[fromId];
+  }
+
+  for (const key of Object.keys(node)){
+    const v = node[key];
+    if (typeof v === 'string'){
+      if (v === fromId) node[key] = toId;
+      continue;
+    }
+    if (!v || typeof v !== 'object') continue;
+    if (v === usersNode) continue;
+    replacePlayerRefDeep(v, fromId, toId, usersNode);
+  }
+}
+
+async function takeOverSeat(){
+  const takeover = pendingTakeover;
+  if (!takeover || !state.roomCode || state.seatedTable !== null) return;
+
+  btnKickYes.disabled = true;
+  try {
+    const roomRef = ref(db, `rooms/${state.roomCode}`);
+    const tx = await runTransaction(roomRef, (room) => {
+      if (!room) return room;
+      const tables = room.tables || {};
+      const seat = tables[takeover.seatIndex];
+      if (!seat || seat.playerId !== takeover.playerId) return room;
+
+      const usersNode = room.users || null;
+      replacePlayerRefDeep(room, takeover.playerId, state.userId, usersNode);
+
+      room.tables = room.tables || {};
+      room.tables[takeover.seatIndex] = {
+        ...(room.tables[takeover.seatIndex] || {}),
+        playerId: state.userId,
+        playerName: state.userName || '名無し',
+      };
+
+      room.users = room.users || {};
+      room.users[state.userId] = {
+        ...(room.users[state.userId] || {}),
+        name: state.userName || '名無し',
+        joinedAt: room.users[state.userId]?.joinedAt || Date.now(),
+      };
+
+      return room;
+    }, { applyLocally:false });
+
+    if (tx.committed){
+      state.seatedTable = takeover.seatIndex;
+      seatPop.classList.add('hidden');
+    }
+  } finally {
+    btnKickYes.disabled = false;
+    hideKickDialog();
+  }
+}
+
+btnKickNo.onclick = () => hideKickDialog();
+btnKickYes.onclick = async () => { await takeOverSeat(); };
+kickDialog.addEventListener('click', (ev) => {
+  if (ev.target === kickDialog) hideKickDialog();
+});
 copyLinkBtn.addEventListener('click', async () => {
   const url = `${location.origin}${location.pathname}?room=${state.roomCode}`;
   try {
@@ -8928,6 +9040,11 @@ function subscribePlayers(){
 
     const meStillSeated = players.some(p => p.id === state.userId);
     if (!meStillSeated && state.seatedTable !== null) state.seatedTable = null;
+
+    if (pendingTakeover){
+      const stillSame = players.some(p => p.seatIndex === pendingTakeover.seatIndex && p.id === pendingTakeover.playerId);
+      if (!stillSame) hideKickDialog();
+    }
 
     await syncSeatUI();
     renderPlayerCircle(players);
@@ -9289,6 +9406,13 @@ function renderPlayerCircle(players){
         tag.style.opacity = '.55';
         tag.style.filter = 'grayscale(1)';
       }
+      if (state.seatedTable === null && !state.gameOver){
+        tag.classList.add('takeover-target');
+        tag.addEventListener('click', () => {
+          const target = latestPlayers.find(lp => lp.id === p.id);
+          if (target) showKickDialog(target);
+        });
+      }
       playerCircle.appendChild(tag);
     } else {
       const fan = document.createElement('div');
@@ -9405,6 +9529,14 @@ function renderPlayerCircle(players){
       const name = document.createElement('div');
       name.className = 'fan-name';
       name.textContent = p.name + (isElim ? '（脱落）' : '');
+      if (state.seatedTable === null && !state.gameOver){
+        name.classList.add('takeover-target');
+        name.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const target = latestPlayers.find(lp => lp.id === p.id);
+          if (target) showKickDialog(target);
+        });
+      }
 
       fan.appendChild(miniHand);
       fan.appendChild(name);
