@@ -94,6 +94,10 @@
     justify-content:center;
     pointer-events:none;
   }
+  .player-fan.takeover-target,
+  .player-tag.takeover-target{
+    cursor:pointer;
+  }
   /* ★ ③/④選択中はクリックできるようにする */
   .player-fan.pick-mode{ pointer-events:auto; }
   .player-fan.effect8-drop-target{
@@ -2945,6 +2949,7 @@ async function runExplorationPhaseSequence(eventId){
 
 let isRenderingSeatTabs = false;
 let latestPlayers = [];
+let pendingSeatTakeover = null;
 
 let prevIsMyTurn = false;
 let autoDrawInFlight = false;
@@ -2994,6 +2999,83 @@ async function restoreSeatFromDB(){
     if (t && t.playerId === state.userId) { mySeatIndex = Number(seatIndex); break; }
   }
   if (mySeatIndex !== null) state.seatedTable = mySeatIndex;
+}
+
+function deepReplacePlayerId(value, fromId, toId){
+  if (value === fromId) return toId;
+  if (Array.isArray(value)) return value.map((item) => deepReplacePlayerId(item, fromId, toId));
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  for (const [key, v] of Object.entries(value)) out[key] = deepReplacePlayerId(v, fromId, toId);
+  return out;
+}
+
+function transferPlayerMapEntry(root, mapKey, fromId, toId){
+  const src = (root && typeof root === 'object' && root[mapKey] && typeof root[mapKey] === 'object') ? { ...root[mapKey] } : {};
+  if (!Object.prototype.hasOwnProperty.call(src, fromId)) return;
+  if (!Object.prototype.hasOwnProperty.call(src, toId)) src[toId] = src[fromId];
+  delete src[fromId];
+  root[mapKey] = src;
+}
+
+async function runSeatTakeover(targetSeatIndex, displacedPlayerId){
+  if (!state.roomCode || !targetSeatIndex || !displacedPlayerId) return false;
+  if (state.seatedTable !== null) return false;
+
+  const roomRef = ref(db, `rooms/${state.roomCode}`);
+  const result = await runTransaction(roomRef, (room) => {
+    const next = room && typeof room === 'object' ? { ...room } : {};
+    const tables = next.tables && typeof next.tables === 'object' ? { ...next.tables } : {};
+    const seatKey = String(targetSeatIndex);
+    const seat = tables[seatKey] && typeof tables[seatKey] === 'object' ? { ...tables[seatKey] } : null;
+    if (!seat || seat.playerId !== displacedPlayerId) return room;
+
+    const alreadySeated = Object.values(tables).some((entry) => entry && entry.playerId === state.userId);
+    if (alreadySeated) return room;
+
+    tables[seatKey] = { playerId: state.userId, playerName: state.userName || '名無し' };
+    next.tables = tables;
+
+    transferPlayerMapEntry(next, 'hands', displacedPlayerId, state.userId);
+    transferPlayerMapEntry(next, 'played', displacedPlayerId, state.userId);
+    transferPlayerMapEntry(next, 'eliminated', displacedPlayerId, state.userId);
+    transferPlayerMapEntry(next, 'kt1Revived', displacedPlayerId, state.userId);
+
+    const replaceTargets = [
+      'turn',
+      'effect2', 'effect3', 'effect4', 'effect6', 'effect7', 'effect8',
+      'effectKt2', 'effectKt3', 'effectKt6', 'effectKt7',
+      'drawEvent', 'returnTopEvent', 'reshuffleEvent', 'kt4ShuffleEvent', 'kt2ShuffleEvent',
+      'ruinMoveEvent', 'ruinTakeEvent', 'handTransferEvent',
+      'fiveSlideEvent', 'xRevealEvent', 'oneRevealEvent', 'explorationFaceEvent',
+      'gameOver'
+    ];
+    for (const key of replaceTargets){
+      if (!(key in next)) continue;
+      next[key] = deepReplacePlayerId(next[key], displacedPlayerId, state.userId);
+    }
+    return next;
+  }, { applyLocally:false });
+
+  const committed = !!result?.committed;
+  if (committed){
+    state.seatedTable = Number(targetSeatIndex);
+    seatPop.classList.add('hidden');
+  }
+  return committed;
+}
+
+function openSeatTakeoverDialog(player){
+  if (!player || !player.id) return;
+  if (state.seatedTable !== null) return;
+  if (player.id === state.userId) return;
+  pendingSeatTakeover = {
+    seatIndex: Number(player.seatIndex),
+    playerId: player.id,
+    playerName: player.name || '名無し',
+  };
+  kickMessage.textContent = `「${pendingSeatTakeover.playerName}」を追い出して、席${pendingSeatTakeover.seatIndex}に着席しますか？`;
+  kickDialog.classList.remove('hidden');
 }
 
 function refreshRoomLabels(){
@@ -8935,6 +9017,19 @@ function subscribePlayers(){
   });
 }
 
+btnKickNo.onclick = () => {
+  pendingSeatTakeover = null;
+  kickDialog.classList.add('hidden');
+};
+
+btnKickYes.onclick = async () => {
+  const takeover = pendingSeatTakeover;
+  pendingSeatTakeover = null;
+  kickDialog.classList.add('hidden');
+  if (!takeover) return;
+  await runSeatTakeover(takeover.seatIndex, takeover.playerId);
+};
+
 function radToDeg(r){ return r * 180 / Math.PI; }
 
 /* 遺跡描画（2x3） */
@@ -9306,6 +9401,15 @@ function renderPlayerCircle(players){
       // ★③/④選択中（使用者のみ）→ 他プレイヤーの扇をクリック可
       if (pickMode && !isElim){
         fan.classList.add('pick-mode');
+      }
+
+      const takeoverEnabled = !pickMode && !state.gameOver && state.seatedTable === null;
+      if (takeoverEnabled){
+        fan.classList.add('takeover-target');
+        fan.addEventListener('click', (ev) => {
+          if (ev.target && ev.target.closest('.mini-card')) return;
+          openSeatTakeoverDialog(p);
+        });
       }
 
       const handData = state.hands[p.id];
