@@ -8918,6 +8918,10 @@ function renderRuinsArea(){
   const mineKt6SelectingDiscard = !!(efKt6 && efKt6.playerId === state.userId && kt6Phase === 'selectDiscard');
   const kt6SelectedSlots = Array.isArray(efKt6?.selectedSlots) ? efKt6.selectedSlots.map(Number).filter(n => Number.isFinite(n)) : [];
   const kt6FaceUpSlots = Array.isArray(efKt6?.faceUpSlots) ? efKt6.faceUpSlots.map(Number).filter(n => Number.isFinite(n)) : [];
+  const kt6ActorFaceUpSlots = (efKt6 && efKt6.playerId === state.userId && (kt6Phase === 'selectDiscard' || kt6Phase === 'confirmShuffle') && Number.isFinite(Number(efKt6?.cardXSlotIndex)))
+    ? [Number(efKt6.cardXSlotIndex)]
+    : [];
+  const kt6DisplayFaceUpSlots = Array.from(new Set([...kt6FaceUpSlots, ...kt6ActorFaceUpSlots]));
   const kt6HintSlots = mineKt6SelectingDiscard
     ? (Array.isArray(efKt6?.hintSlots) ? efKt6.hintSlots.map(Number).filter(n => Number.isFinite(n)) : [])
     : [];
@@ -8953,7 +8957,7 @@ function renderRuinsArea(){
       card.classList.add('exploration-front');
       setCardFace(card, item);
     }
-    if (kt6FaceUpSlots.includes(i)){
+    if (kt6DisplayFaceUpSlots.includes(i)){
       card.classList.add('exploration-front');
       setCardFace(card, item?.v ?? item);
     }
