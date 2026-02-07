@@ -2178,6 +2178,7 @@ const DECK_SETS = [
     ],
   },
 ];
+const HELP_CARDS_PER_ROW = 4;
 const deckSetState = Object.fromEntries(DECK_SETS.map((set) => [set.id, true]));
 const deckCardState = Object.fromEntries(
   DECK_SETS.flatMap((set) => Object.keys(set.cardPool).map((cardKey) => [cardKey, true]))
@@ -2276,7 +2277,9 @@ function renderHelpList(){
     const grid = document.createElement('div');
     grid.className = 'help-card-grid';
 
-    set.helpRows.forEach((rowCards) => {
+    const orderedCards = set.helpRows.flat();
+    for (let i = 0; i < orderedCards.length; i += HELP_CARDS_PER_ROW) {
+      const rowCards = orderedCards.slice(i, i + HELP_CARDS_PER_ROW);
       const row = document.createElement('div');
       row.className = 'help-card-row';
       rowCards.forEach((value) => {
@@ -2297,7 +2300,7 @@ function renderHelpList(){
         row.appendChild(card);
       });
       grid.appendChild(row);
-    });
+    }
 
     toggle.addEventListener('click', () => {
       deckSetState[set.id] = !deckSetState[set.id];
