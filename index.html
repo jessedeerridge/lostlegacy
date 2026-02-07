@@ -795,8 +795,8 @@
     flex-wrap:nowrap;
   }
   .help-card{
-    width:calc(60px * 1.2);
-    flex:0 0 calc(60px * 1.2);
+    width:calc(66px * 1.2);
+    flex:0 0 calc(66px * 1.2);
     aspect-ratio:var(--card-aspect);
     height:auto;
     cursor:pointer;
@@ -1075,6 +1075,33 @@
   .confirm-pop .btn{ background:rgba(255,255,255,.85); border-color:rgba(0,0,0,.12); }
   .confirm-pop .btn.primary{ background:#111; border-color:#111; color:#fff; }
   .confirm-pop .btn.nowrap{ white-space:nowrap; }
+
+  /* 画面下：行動説明ポップ（水色塗り・黒字） */
+  .action-hint-pop{
+    position:fixed;
+    left:50%;
+    bottom:12px;
+    transform:translateX(-50%);
+    background:#bfe8ff;
+    border:1px solid rgba(0,0,0,.12);
+    border-radius:14px;
+    box-shadow:0 12px 28px rgba(0,0,0,.18);
+    padding:10px 14px;
+    z-index:905;
+    min-width:280px;
+    max-width:calc(100% - 24px);
+    color:#111;
+    font-size:13px;
+    font-weight:700;
+    line-height:1.4;
+    text-align:center;
+    pointer-events:none;
+  }
+  .action-hint-pop.hidden{ display:none; }
+  .action-hint-pop.for-others{
+    top:72px;
+    bottom:auto;
+  }
 
   /* ===== 全員：⑤スライド演出 ===== */
   .global-slide-card{
@@ -1596,6 +1623,10 @@
   <button class="btn primary nowrap" id="btnConfirmYes">はい</button>
 </div>
 
+<div id="actionHintPop" class="action-hint-pop hidden">
+  <div id="actionHintMsg"></div>
+</div>
+
 <div id="kt8GuessPanel" class="kt8-guess-panel hidden"></div>
 
 <!-- ★全員：✕拡大＋揺れ -->
@@ -2086,6 +2117,8 @@ const confirmPop = document.getElementById('confirmPop');
 const confirmMsg = document.getElementById('confirmMsg');
 const btnConfirmYes = document.getElementById('btnConfirmYes');
 const btnConfirmNo = document.getElementById('btnConfirmNo');
+const actionHintPop = document.getElementById('actionHintPop');
+const actionHintMsg = document.getElementById('actionHintMsg');
 const kt8GuessPanel = document.getElementById('kt8GuessPanel');
 
 const globalXBackdrop = document.getElementById('globalXBackdrop');
@@ -2321,6 +2354,7 @@ function showConfirmPop(text, onYes, options = {}){
   if (btnConfirmYes) btnConfirmYes.textContent = yesText;
 
   confirmPop.classList.remove('hidden');
+  renderActionHintPop();
 }
 function hideConfirmPop(){
   confirmPop.classList.add('hidden');
@@ -2331,6 +2365,7 @@ function hideConfirmPop(){
     btnConfirmNo.textContent = 'いいえ';
   }
   if (btnConfirmYes) btnConfirmYes.textContent = 'はい';
+  renderActionHintPop();
 }
 
 function showKt8GuessPanel(options, onPick){
@@ -2403,6 +2438,151 @@ function showCenterNotice(text){
 function hideCenterNotice(){
   if (!centerNotice) return;
   centerNotice.classList.add('hidden');
+}
+
+function getActionHintData(){
+  const myId = state.userId;
+
+  const kt2 = state.effectKt2;
+  if (kt2){
+    const mine = kt2.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '捨て札のカードを選んで、山札に戻してください。'
+        : '2 捨て札のカードを選んで、山札に戻す。'
+    };
+  }
+
+  const ef2 = state.effect2;
+  if (ef2){
+    const mine = ef2.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '山札にカードを1枚戻してください。'
+        : '2 山札から1枚ドローして、手札のカードと交換できる。'
+    };
+  }
+
+  const ef3 = state.effect3;
+  if (ef3){
+    const mine = ef3.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '見たいカードを選んでください。'
+        : '3 プレイヤーの手札を見た時に、5であれば勝つ。'
+    };
+  }
+
+  const ef4 = state.effect4;
+  if (ef4 && String(ef4.mode || 'normal') === 'kt4'){
+    const mine = ef4.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '見たいカードを選んでください。'
+        : '4 全員の手札を混ぜた後、プレイヤーの手札を見る。'
+    };
+  }
+
+  if (ef4 && String(ef4.mode || 'normal') !== 'kt4'){
+    const mine = ef4.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '見たいカードを選んでください。'
+        : '4 プレイヤーの手札を見た時に、✕であれば脱落させる。'
+    };
+  }
+
+  const ef6 = state.effect6;
+  if (ef6){
+    const mine = ef6.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '遺跡にカードを1枚置いてください。'
+        : '6 山札から1枚ドローして、好きなカードを遺跡に置く。'
+    };
+  }
+
+  const ef7 = state.effect7;
+  const efKt3 = state.effectKt3 || ((ef7 && String(ef7.mode || 'normal') === 'kt3') ? ef7 : null);
+  if (efKt3){
+    const mine = efKt3.playerId === myId;
+    if (!mine) return { mine, text: '3 遺跡から2枚見て、好きなカードを取る。その後、手札のカードを1枚遺跡に置く。' };
+    if (efKt3.phase === 'placeBack') return { mine, text: '好きなカードを1枚とった後で、どちらかを遺跡に置いてください。' };
+    return { mine, text: '遺跡から2枚まで見たいカードを選んでください。' };
+  }
+
+  if (ef7 && String(ef7.mode || 'normal') === 'kt5'){
+    return {
+      mine: false,
+      text: '5 空中庭園と遺跡カードを全て混ぜて、遺跡に置く。'
+    };
+  }
+
+  const efKt7 = state.effectKt7 || ((ef7 && String(ef7.mode || 'normal') === 'kt7') ? ef7 : null);
+  if (efKt7){
+    const mine = efKt7.playerId === myId;
+    if (!mine) return { mine, text: '7 遺跡のカード2枚を見ずに混ぜる。その後、好きな遺跡のカードを見る。' };
+    if (efKt7.phase === 'inspectPick') return { mine, text: '遺跡から見たいカードを選んでください。' };
+    return { mine, text: '混ぜる遺跡のカードを2枚選んでください。' };
+  }
+
+  if (ef7 && !['kt3', 'kt5', 'kt7'].includes(String(ef7.mode || 'normal'))){
+    const mine = ef7.playerId === myId;
+    if (!mine) return { mine, text: '7 遺跡から1枚とって、手札のカードと交換できる。' };
+    if (ef7.phase === 'placeBack') return { mine, text: '遺跡にカードを1枚置いてください。' };
+    return { mine, text: '遺跡から1枚選んでください。' };
+  }
+
+  const kt6 = state.effectKt6;
+  if (kt6){
+    const mine = kt6.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '捨て札のカードを選んで遺跡に置いてください。'
+        : '6 山札の一番上のカードと捨て札の1枚を選んで、2枚を混ぜて遺跡に置く。'
+    };
+  }
+
+  const ef8 = state.effect8;
+  if (ef8 && String(ef8.mode || 'normal') === 'kt8'){
+    const mine = ef8.playerId === myId;
+    return {
+      mine,
+      text: mine
+        ? '数字を宣言して、見たいカードを選んでください。'
+        : '数字を宣言して、カードを見る。当たっていればそのプレイヤーを脱落させる。'
+    };
+  }
+
+  if (ef8 && String(ef8.mode || 'normal') !== 'kt8'){
+    const mine = ef8.playerId === myId;
+    if (!mine) return { mine, text: '8 プレイヤーの手札をとって、交換できる。' };
+    if (ef8.phase === 'return') return { mine, text: 'プレイヤーにカードを1枚渡してください。' };
+    return { mine, text: 'カードを選んで、とってください。' };
+  }
+
+  return { mine: false, text: '' };
+}
+
+function renderActionHintPop(){
+  if (!actionHintPop || !actionHintMsg) return;
+  const info = getActionHintData();
+  const text = info.text || '';
+  if (!text || state.gameOver || !confirmPop?.classList.contains('hidden')){
+    actionHintPop.classList.add('hidden');
+    actionHintPop.classList.remove('for-others');
+    return;
+  }
+  actionHintMsg.textContent = text;
+  actionHintPop.classList.toggle('for-others', !info.mine);
+  actionHintPop.classList.remove('hidden');
 }
 
 async function showExplorationFace(){
@@ -3161,6 +3341,8 @@ function updateTurnUI(){
     hideGameOver();
     hideCenterNotice();
   }
+
+  renderActionHintPop();
 }
 
 function updateHostUI(){
@@ -3419,7 +3601,7 @@ function subscribeEffectKt6(){
     runKt6PhaseAnimations(raw);
 
     if (mine && raw?.phase === 'confirmShuffle' && !state.gameOver){
-      showConfirmPop('この2枚をシャッフルしますか', async () => {
+      showConfirmPop('この2枚を混ぜますか', async () => {
         await confirmKt6Shuffle(true);
       }, {
         onNo: async () => {
