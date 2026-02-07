@@ -1098,7 +1098,10 @@
     pointer-events:none;
   }
   .action-hint-pop.hidden{ display:none; }
-  .action-hint-pop.with-confirm{ bottom:70px; }
+  .action-hint-pop.for-others{
+    top:72px;
+    bottom:auto;
+  }
 
   /* ===== 全員：⑤スライド演出 ===== */
   .global-slide-card{
@@ -2437,69 +2440,83 @@ function hideCenterNotice(){
   centerNotice.classList.add('hidden');
 }
 
-function getActionHintText(){
+function getActionHintData(){
   const myId = state.userId;
 
   const ef2 = state.effect2;
   if (ef2){
     const mine = ef2.playerId === myId;
-    return mine
-      ? '2 山札にカードを1枚戻してください。'
-      : '2 山札から1枚ドローして、手札のカードと交換できる。';
+    return {
+      mine,
+      text: mine
+        ? '山札にカードを1枚戻してください。'
+        : '2 山札から1枚ドローして、手札のカードと交換できる。'
+    };
   }
 
   const ef3 = state.effect3;
   if (ef3){
     const mine = ef3.playerId === myId;
-    return mine
-      ? '3 見たいカードを選んでください。'
-      : '3 プレイヤーの手札を見た時に、5であれば勝つ。';
+    return {
+      mine,
+      text: mine
+        ? '見たいカードを選んでください。'
+        : '3 プレイヤーの手札を見た時に、5であれば勝つ。'
+    };
   }
 
   const ef4 = state.effect4;
   if (ef4 && String(ef4.mode || 'normal') !== 'kt4'){
     const mine = ef4.playerId === myId;
-    return mine
-      ? '4 見たいカードを選んでください。'
-      : '4 プレイヤーの手札を見た時に、✕であれば脱落させる。';
+    return {
+      mine,
+      text: mine
+        ? '見たいカードを選んでください。'
+        : '4 プレイヤーの手札を見た時に、✕であれば脱落させる。'
+    };
   }
 
   const ef6 = state.effect6;
   if (ef6){
     const mine = ef6.playerId === myId;
-    return mine
-      ? '6 遺跡にカードを1枚置いてください。'
-      : '6 山札から1枚ドローして、好きなカードを遺跡に置く。';
+    return {
+      mine,
+      text: mine
+        ? '遺跡にカードを1枚置いてください。'
+        : '6 山札から1枚ドローして、好きなカードを遺跡に置く。'
+    };
   }
 
   const ef7 = state.effect7;
   if (ef7 && !['kt3', 'kt5', 'kt7'].includes(String(ef7.mode || 'normal'))){
     const mine = ef7.playerId === myId;
-    if (!mine) return '7 遺跡から1枚とって、手札のカードと交換できる。';
-    if (ef7.phase === 'placeBack') return '7 遺跡にカードを1枚置いてください。';
-    return '7 遺跡から1枚選んでください。';
+    if (!mine) return { mine, text: '7 遺跡から1枚とって、手札のカードと交換できる。' };
+    if (ef7.phase === 'placeBack') return { mine, text: '遺跡にカードを1枚置いてください。' };
+    return { mine, text: '遺跡から1枚選んでください。' };
   }
 
   const ef8 = state.effect8;
   if (ef8 && String(ef8.mode || 'normal') !== 'kt8'){
     const mine = ef8.playerId === myId;
-    if (!mine) return '8 プレイヤーの手札をとって、交換できる。';
-    if (ef8.phase === 'return') return '8 プレイヤーにカードを1枚渡してください。';
-    return '8 カードを選んで、とってください。';
+    if (!mine) return { mine, text: '8 プレイヤーの手札をとって、交換できる。' };
+    if (ef8.phase === 'return') return { mine, text: 'プレイヤーにカードを1枚渡してください。' };
+    return { mine, text: 'カードを選んで、とってください。' };
   }
 
-  return '';
+  return { mine: false, text: '' };
 }
 
 function renderActionHintPop(){
   if (!actionHintPop || !actionHintMsg) return;
-  const text = getActionHintText();
-  if (!text || state.gameOver){
+  const info = getActionHintData();
+  const text = info.text || '';
+  if (!text || state.gameOver || !confirmPop?.classList.contains('hidden')){
     actionHintPop.classList.add('hidden');
+    actionHintPop.classList.remove('for-others');
     return;
   }
   actionHintMsg.textContent = text;
-  actionHintPop.classList.toggle('with-confirm', !confirmPop?.classList.contains('hidden'));
+  actionHintPop.classList.toggle('for-others', !info.mine);
   actionHintPop.classList.remove('hidden');
 }
 
