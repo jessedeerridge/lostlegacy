@@ -391,6 +391,15 @@
   .mini-card.pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
   }
+  .mini-card.sp1-pickable{
+    pointer-events:auto;
+    cursor:pointer;
+    animation: fanPickPulse 720ms ease-in-out infinite;
+    outline:2px solid rgba(239,68,68,.0);
+  }
+  .mini-card.sp1-pickable:hover{
+    outline:2px solid rgba(239,68,68,.65);
+  }
 
   .played-row{
     position:absolute;
@@ -442,6 +451,12 @@
   }
   .played-card.kt6-pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
+    outline-offset:1px;
+  }
+  .played-card.sp1-x-boost{
+    animation: kt6PlayedPulse 760ms ease-in-out infinite;
+    transform: scale(1.2);
+    outline:2px solid rgba(239,68,68,.75);
     outline-offset:1px;
   }
   .played-card.drag-source-hidden{
@@ -1690,6 +1705,7 @@ const KT5_FLOAT_TOTAL_MS = FIVE_SLIDE_TOTAL_MS;
 const LAST_SURVIVOR_DELAY_MS = 1200;
 const XRAY_MINI_DELAY_MS = 1200;
 const ONE_REVEAL_DELAY_MS = 1200;
+const SP1_EFFECT_DELAY_MS = 1200;
 const EXPLORATION_SKIP_DELAY_MS = 1800;
 
 const CARD_META = {
@@ -2009,6 +2025,7 @@ const state = {
   effectKt2: null,
   effectKt7: null,
   effectKt6: null,
+  effectSp1: null,
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
@@ -2055,6 +2072,9 @@ const ui = {
 
   effectKt6SelectingDiscard: false,
   effectKt6TargetSlot: null,
+
+  effectSp1Selecting: false,
+  effectSp1Confirming: false,
 
   kt8Guessing: false,
   kt8GuessOptions: [],
@@ -2569,6 +2589,15 @@ function getActionHintData(){
     if (!mine) return { mine, text: '8 プレイヤーの手札をとって、交換できる。' };
     if (ef8.phase === 'return') return { mine, text: 'プレイヤーにカードを1枚渡してください。' };
     return { mine, text: 'カードを選んで、とってください。' };
+  }
+
+  const sp1 = state.effectSp1;
+  if (sp1){
+    const mine = sp1.playerId === myId;
+    if (!mine) return { mine, text: 'sp1 他プレイヤーの捨て札の✕を確認して、対象を脱落させる。' };
+    if (sp1.phase === 'selectTarget') return { mine, text: '対象プレイヤーのカードを選んでください。' };
+    if (sp1.phase === 'resolving') return { mine, text: 'sp1の効果を処理中です。' };
+    return { mine, text: 'sp1 効果処理中。' };
   }
 
   return { mine: false, text: '' };
@@ -3304,6 +3333,7 @@ function calcIsPlayable(){
   if (ui.effect8Selecting || ui.effect8Returning) return false;
   if (ui.effectKt2Selecting) return false;
   if (ui.effectKt6SelectingDiscard) return false;
+  if (ui.effectSp1Selecting || ui.effectSp1Confirming) return false;
 
   // 脱落者は操作不可
   if (state.eliminated?.[myId]) return false;
@@ -3793,6 +3823,22 @@ function subscribeEffect8(){
   });
 }
 
+function subscribeEffectSp1(){
+  const eRef = ref(db, `rooms/${state.roomCode}/effectSp1`);
+  onValue(eRef, snap => {
+    state.effectSp1 = snap.val() || null;
+
+    const mine = state.effectSp1 && state.effectSp1.playerId === state.userId;
+    const phase = state.effectSp1?.phase || null;
+
+    ui.effectSp1Selecting = !!(mine && phase === 'selectTarget');
+    ui.effectSp1Confirming = !!(mine && phase === 'resolving');
+
+    updateTurnUI();
+    renderHands();
+  });
+}
+
 function subscribeTurn(){
   const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
   onValue(turnRef, async snap => {
@@ -3952,7 +3998,7 @@ function subscribeRuinMoveEvent(){
     const byPlayerId = String(ev.byPlayerId || '');
 
     if (!fromPid) return;
-    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played' && mode !== 'kt6Deck' && mode !== 'kt6DiscardPlayed') return;
+    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played' && mode !== 'kt6Deck' && mode !== 'kt6DiscardPlayed' && mode !== 'sp1') return;
 
     if (mode === 'oneReveal' || mode === 'kt8'){
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
@@ -3960,6 +4006,10 @@ function subscribeRuinMoveEvent(){
         setOneRevealTargetCard(fromPid, pendingOneRevealTarget.cardIndex, false);
         pendingOneRevealTarget = null;
       }
+      return;
+    }
+    if (mode === 'sp1') {
+      animateMoveFromPlayerToRuin(fromPid, String(cardValue ?? ''), slotIndex);
       return;
     }
     if (mode === 'xReveal'){
@@ -7006,6 +7056,10 @@ async function playCardFromHand(cardIndex){
     await resolveKt8(myId);
     return;
   }
+  if (usedKey === 'sp1'){
+    await resolveSp1(myId);
+    return;
+  }
   if (usedKey === '1'){
     await advanceTurnToNextPlayer();
     return;
@@ -7137,6 +7191,7 @@ async function clearEffectsForOneReveal(){
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectSp1`), null),
   ]);
 }
 
@@ -7147,6 +7202,7 @@ async function clearEffectsForXReveal(){
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectSp1`), null),
   ]);
 }
 
@@ -8959,6 +9015,84 @@ async function handleEffect8Drop(cardIndex){
   await advanceTurnToNextPlayer();
 }
 
+
+async function resolveSp1(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  await update(turnRef, { paused:true });
+
+  const players = await getSeatedPlayers();
+  const candidates = players
+    .filter(p => p.id !== playerId)
+    .map(p => p.id)
+    .filter(pid => {
+      const played = Array.isArray(state.played?.[pid]) ? state.played[pid] : [];
+      return played.some(v => normalizeCardValue(v) === 'x');
+    });
+
+  if (!candidates.length){
+    await update(turnRef, { paused:false });
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const effectPayload = {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'selectTarget',
+    at: Date.now(),
+    targetPlayerIds: candidates,
+  };
+
+  if (candidates.length === 1){
+    await set(ref(db, `rooms/${state.roomCode}/effectSp1`), effectPayload);
+    await handleSp1Pick(candidates[0], 0);
+    return;
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/effectSp1`), effectPayload);
+}
+
+async function handleSp1Pick(targetPlayerId, cardIndex){
+  if (!state.roomCode) return;
+  const ef = state.effectSp1;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'selectTarget') return;
+  if (!Array.isArray(ef.targetPlayerIds) || !ef.targetPlayerIds.includes(targetPlayerId)) return;
+
+  const cards = Array.isArray(state.hands?.[targetPlayerId]?.cards) ? state.hands[targetPlayerId].cards : [];
+  if (!cards.length) return;
+
+  const idx = Math.max(0, Math.min(cards.length - 1, Number(cardIndex || 0)));
+  const value = String(cards[idx] ?? '');
+
+  await set(ref(db, `rooms/${state.roomCode}/effectSp1`), {
+    ...ef,
+    phase: 'resolving',
+    at: Date.now(),
+    targetPlayerId,
+    targetCardIndex: idx,
+  });
+
+  await sleep(SP1_EFFECT_DELAY_MS);
+  await removeCardFromHandByIndex(targetPlayerId, idx);
+
+  const slotIndex = await placeCardIntoRuins(targetPlayerId, value, { eventMode: 'sp1' });
+  if (slotIndex !== null){
+    await sleep(RUIN_MOVE_ANIM_MS);
+  }
+
+  await eliminatePlayerWithKt1Check(targetPlayerId, state.turn?.turnSeq);
+
+  await sleep(SP1_EFFECT_DELAY_MS);
+  await set(ref(db, `rooms/${state.roomCode}/effectSp1`), null);
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
+}
+
 async function getSeatedPlayers(){
   const tablesSnap = await get(ref(db, `rooms/${state.roomCode}/tables`));
   const tables = tablesSnap.val() || {};
@@ -9057,6 +9191,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeEffectKt6();
   subscribeEffect7();
   subscribeEffect8();
+  subscribeEffectSp1();
 
   subscribeTurn();
   subscribeDrawEvent();
@@ -9632,9 +9767,10 @@ function renderPlayerCircle(players){
   const e3MineSelecting = !!(state.effect3 && state.effect3.playerId === state.userId && state.effect3.phase === 'select');
   const e4MineSelecting = !!(state.effect4 && state.effect4.playerId === state.userId && state.effect4.phase === 'select');
   const e8MineSelecting = !!(state.effect8 && state.effect8.playerId === state.userId && state.effect8.phase === 'select');
+  const sp1MineSelecting = !!(state.effectSp1 && state.effectSp1.playerId === state.userId && state.effectSp1.phase === 'selectTarget');
   const kt2MineSelecting = !!(state.effectKt2 && state.effectKt2.playerId === state.userId && state.effectKt2.phase === 'select');
   const kt6MineSelectingDiscard = !!(state.effectKt6 && state.effectKt6.playerId === state.userId && state.effectKt6.phase === 'selectDiscard');
-  const pickMode = (e3MineSelecting || e4MineSelecting || e8MineSelecting) && !state.gameOver;
+  const pickMode = (e3MineSelecting || e4MineSelecting || e8MineSelecting || sp1MineSelecting) && !state.gameOver;
 
   players.forEach((p, idx) => {
     const k = (meIndex === -1) ? idx : (idx - meIndex + n) % n;
@@ -9743,13 +9879,13 @@ function renderPlayerCircle(players){
 
         // ★③/④：使用者が選択中なら pickable
         if (pickMode && !isElim){
-          card.classList.add('pickable');
+          card.classList.add(sp1MineSelecting ? 'sp1-pickable' : 'pickable');
 
           // ここでカードを選ぶ（クリックしたカード番号を「そのまま index」として扱う）
           card.addEventListener('click', async (ev) => {
             ev.stopPropagation();
             // 連打防止：一旦すべてのpickable解除
-            playerCircle.querySelectorAll('.mini-card.pickable').forEach(el => {
+            playerCircle.querySelectorAll('.mini-card.pickable, .mini-card.sp1-pickable').forEach(el => {
               el.classList.remove('pickable');
               el.style.pointerEvents = 'none';
             });
@@ -9763,6 +9899,8 @@ function renderPlayerCircle(players){
               await handleEffect4Pick(pid, idxSel);
             } else if (e8MineSelecting){
               await handleEffect8Pick(pid, idxSel);
+            } else if (sp1MineSelecting){
+              await handleSp1Pick(pid, idxSel);
             }
           }, { once:true });
         }
@@ -9877,6 +10015,16 @@ function renderPlayerCircle(players){
           c.addEventListener('pointercancel', onKt6PlayedPointerCancel);
         }
 
+        const sp1Targeted = state.effectSp1
+          && state.effectSp1.phase === 'selectTarget'
+          && state.effectSp1.playerId === state.userId
+          && Array.isArray(state.effectSp1.targetPlayerIds)
+          && state.effectSp1.targetPlayerIds.includes(p.id)
+          && normalizeCardValue(v) === 'x';
+        if (sp1Targeted){
+          c.classList.add('sp1-x-boost');
+        }
+
         row.appendChild(c);
       });
 
@@ -9950,6 +10098,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effect7`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectSp1`), null),
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
@@ -10007,6 +10156,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effect7`)),
     remove(ref(db, `${base}/effect8`)),
     remove(ref(db, `${base}/effectKt2`)),
+    remove(ref(db, `${base}/effectSp1`)),
 
     remove(ref(db, `${base}/eliminated`)),
     remove(ref(db, `${base}/kt1Revived`)),
