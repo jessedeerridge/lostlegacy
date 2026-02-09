@@ -1589,6 +1589,7 @@
   </div>
   <div class="start-pop-main">
     「スタート」で <b>手札(各1枚)</b> を配布し、<br>
+    次に <b>山札の1枚を遺跡に配置</b> し、<br>
     さらに <b>最初のプレイヤーに1枚ドロー</b> します。<br>
     ※「自分の手番」かつ「手札が2枚」の時だけ、パルス＆ドラッグ可。<br>
     ※ドロー演出は <b>全員の画面</b> に出ます。<br>
@@ -9934,13 +9935,18 @@ async function dealAllCardsAndInitialDraw(){
 
   const firstPlayerId = players[Math.floor(Math.random() * players.length)].id;
 
+  const initialRuin = deckRaw.shift();
+  const initialRuinDisp = (initialRuin !== undefined) ? toDisplayValue(initialRuin) : null;
   const initialDraw = deckRaw.shift();
   const initialDrawDisp = (initialDraw !== undefined) ? toDisplayValue(initialDraw) : null;
+
+  const initialRuins = new Array(RUINS_SLOT_COUNT).fill(null);
+  if (initialRuinDisp != null) initialRuins[0] = initialRuinDisp;
 
   await Promise.all([
     set(ref(db, `rooms/${state.roomCode}/hands`), hands),
     set(ref(db, `rooms/${state.roomCode}/played`), {}),
-    set(ref(db, `rooms/${state.roomCode}/ruins`), new Array(RUINS_SLOT_COUNT).fill(null)),
+    set(ref(db, `rooms/${state.roomCode}/ruins`), initialRuins),
 
     set(ref(db, `rooms/${state.roomCode}/effect2`), null),
     set(ref(db, `rooms/${state.roomCode}/effect3`), null),
