@@ -96,6 +96,15 @@
   }
   /* ★ ③/④選択中はクリックできるようにする */
   .player-fan.pick-mode{ pointer-events:auto; }
+  .player-fan.sp1-target-pickable,
+  .player-fan .fan-name.sp1-target-pickable{
+    cursor:pointer;
+    animation:sp1TargetPulse 760ms ease-in-out infinite;
+  }
+  @keyframes sp1TargetPulse {
+    0%, 100% { filter:brightness(1); }
+    50% { filter:brightness(1.35); }
+  }
   .player-fan.effect8-drop-target{
     pointer-events:auto;
   }
@@ -443,6 +452,20 @@
   .played-card.kt6-pickable:hover{
     outline:2px solid rgba(37,99,235,.55);
     outline-offset:1px;
+  }
+  .played-card.sp1-boosted::after{
+    content:'1.2x';
+    position:absolute;
+    right:2px;
+    bottom:2px;
+    padding:1px 3px;
+    border-radius:4px;
+    background:rgba(16,185,129,.92);
+    color:#fff;
+    font-size:9px;
+    font-weight:800;
+    line-height:1;
+    z-index:3;
   }
   .played-card.drag-source-hidden{
     opacity:0 !important;
@@ -1779,7 +1802,7 @@ function getCardEffectText(value){
     case 'ktx':
       return '捨て札にこのカードが2枚あれば、手札を遺跡に置いて、脱落する。';
     case 'sp1':
-      return '他プレイヤーの捨て札に✕のカードがあれば、そのプレイヤーの手札を遺跡に置かせる。そのプレイヤーを脱落させる。';
+      return '他プレイヤーの捨て札に✕/kt✕がなければターン終了。あれば該当者の✕/kt✕を1.2倍にして、1人選んで手札を遺跡に移動させ脱落させる。';
     case 'sp2':
       return '捨て札にこのカードがあれば、脱落した時に山札から1枚引いて復帰できる。このカードが捨て札からなくなると、脱落する。';
     case 'sp3':
@@ -2013,6 +2036,7 @@ const state = {
   isHost: false,
   hands: {},
   played: {},
+  sp1Boosted: {},
   room: {},
   deck: [],
   ruins: [],
@@ -2027,6 +2051,7 @@ const state = {
   effectKt2: null,
   effectKt7: null,
   effectKt6: null,
+  effectSp1: null,
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
@@ -2070,6 +2095,7 @@ const ui = {
   effect8TargetPlayerId: null,
 
   effectKt2Selecting: false,
+  effectSp1Selecting: false,
 
   effectKt6SelectingDiscard: false,
   effectKt6TargetSlot: null,
@@ -3334,6 +3360,7 @@ function calcIsPlayable(){
   if (ui.effectKt7SelectingPair || ui.effectKt7Inspecting) return false;
   if (ui.effect8Selecting || ui.effect8Returning) return false;
   if (ui.effectKt2Selecting) return false;
+  if (ui.effectSp1Selecting) return false;
   if (ui.effectKt6SelectingDiscard) return false;
 
   // 脱落者は操作不可
@@ -3420,6 +3447,15 @@ function subscribePlayed(){
   const pRef = ref(db, `rooms/${state.roomCode}/played`);
   onValue(pRef, snap => {
     state.played = snap.val() || {};
+    renderHands();
+  });
+}
+
+
+function subscribeSp1Boosted(){
+  const bRef = ref(db, `rooms/${state.roomCode}/sp1Boosted`);
+  onValue(bRef, snap => {
+    state.sp1Boosted = snap.val() || {};
     renderHands();
   });
 }
@@ -3607,6 +3643,22 @@ function subscribeEffect6(){
       ui.selectedIndex = null;
       updateTurnUI();
       renderMyHand();
+    }
+  });
+}
+
+
+function subscribeEffectSp1(){
+  const eRef = ref(db, `rooms/${state.roomCode}/effectSp1`);
+  onValue(eRef, snap => {
+    state.effectSp1 = snap.val() || null;
+
+    const mine = state.effectSp1 && state.effectSp1.playerId === state.userId;
+    const selecting = !!(mine && state.effectSp1.phase === 'selectTarget');
+    if (ui.effectSp1Selecting !== selecting){
+      ui.effectSp1Selecting = selecting;
+      updateTurnUI();
+      renderHands();
     }
   });
 }
@@ -5091,7 +5143,7 @@ async function maybeAutoDrawAtTurnStart(){
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
 
-  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.effect7Picking || ui.effect7Placing || ui.effect8Selecting || ui.effect8Returning || ui.effectKt6SelectingDiscard) return;
+  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.effect7Picking || ui.effect7Placing || ui.effect8Selecting || ui.effect8Returning || ui.effectSp1Selecting || ui.effectKt6SelectingDiscard) return;
 
   autoDrawInFlight = true;
   const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
@@ -7046,6 +7098,11 @@ async function playCardFromHand(cardIndex){
     return;
   }
 
+  if (usedKey === 'sp1'){
+    await resolveSp1(myId);
+    return;
+  }
+
   await resolveCardEffectPlaceholder(used);
   await advanceTurnToNextPlayer();
   return true;
@@ -7054,6 +7111,117 @@ async function playCardFromHand(cardIndex){
 async function resolveCardEffectPlaceholder(usedCard){
   await new Promise(r => setTimeout(r, 250));
   console.log('EFFECT (placeholder):', usedCard);
+}
+
+
+function hasXOrKtXInPlayed(cards){
+  return (Array.isArray(cards) ? cards : []).some((v) => {
+    const key = normalizeCardValue(v);
+    return key === 'x' || key === 'ktx';
+  });
+}
+
+async function markSp1Boost(playerId){
+  if (!state.roomCode || !playerId) return;
+  await set(ref(db, `rooms/${state.roomCode}/sp1Boosted/${playerId}`), true);
+}
+
+async function chooseSp1Target(candidates){
+  if (!state.roomCode) return null;
+  if (!Array.isArray(candidates) || candidates.length <= 0) return null;
+  await set(ref(db, `rooms/${state.roomCode}/effectSp1`), {
+    playerId: state.userId,
+    phase: 'selectTarget',
+    candidatePlayerIds: candidates,
+    selectedPlayerId: null,
+    at: Date.now(),
+  });
+
+  const selected = await new Promise((resolve) => {
+    const eRef = ref(db, `rooms/${state.roomCode}/effectSp1`);
+    const unsub = onValue(eRef, (snap) => {
+      const ef = snap.val() || null;
+      if (!ef || ef.phase !== 'selectTarget') return;
+      const pid = ef.selectedPlayerId || null;
+      if (pid && candidates.includes(pid)){
+        unsub();
+        resolve(pid);
+      }
+    });
+  });
+
+  await set(ref(db, `rooms/${state.roomCode}/effectSp1`), null);
+  return selected;
+}
+
+async function moveHandToRuinsBySp1(targetPlayerId){
+  if (!state.roomCode || !targetPlayerId) return;
+
+  const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${targetPlayerId}/cards`);
+  let movedValues = [];
+  const rem = await runTransaction(cardsRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    movedValues = arr.map(v => String(v ?? ''));
+    return [];
+  }, { applyLocally:false });
+  if (!rem.committed || !movedValues.length) return;
+
+  for (const movedValue of movedValues){
+    const slotIndex = await placeCardIntoRuins(targetPlayerId, movedValue, { skipEvent:true, eventMode:'sp1Elimination' });
+    if (slotIndex === null) break;
+    await emitRuinMoveEvent(targetPlayerId, movedValue, slotIndex, 'sp1Elimination');
+    await sleep(RUIN_MOVE_ANIM_MS);
+  }
+}
+
+async function resolveSp1(playerId){
+  if (!state.roomCode || !playerId) return;
+
+  const others = latestPlayers
+    .filter((p) => p.id !== playerId && !state.eliminated?.[p.id])
+    .map((p) => p.id);
+
+  const targetCandidates = [];
+  for (const pid of others){
+    const snap = await get(ref(db, `rooms/${state.roomCode}/played/${pid}`));
+    const played = Array.isArray(snap.val()) ? snap.val() : [];
+    if (hasXOrKtXInPlayed(played)) targetCandidates.push(pid);
+  }
+
+  if (!targetCandidates.length){
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await Promise.all(targetCandidates.map((pid) => markSp1Boost(pid)));
+
+  let targetPlayerId = targetCandidates[0];
+  if (targetCandidates.length >= 2){
+    const picked = await chooseSp1Target(targetCandidates);
+    if (!picked){
+      await advanceTurnToNextPlayer();
+      return;
+    }
+    targetPlayerId = picked;
+  }
+
+  await sleep(1000);
+  await moveHandToRuinsBySp1(targetPlayerId);
+  await eliminatePlayerWithKt1Check(targetPlayerId, state.turn?.turnSeq);
+  await sleep(1000);
+  await advanceTurnToNextPlayer();
+}
+
+async function handleSp1TargetPick(targetPlayerId){
+  if (!state.roomCode || !targetPlayerId) return;
+  const ef = state.effectSp1;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'selectTarget') return;
+  const candidates = Array.isArray(ef.candidatePlayerIds) ? ef.candidatePlayerIds : [];
+  if (!candidates.includes(targetPlayerId)) return;
+  await update(ref(db, `rooms/${state.roomCode}/effectSp1`), {
+    selectedPlayerId: targetPlayerId,
+    pickedAt: Date.now(),
+  });
 }
 
 async function removeCardFromHandByIndex(playerId, cardIndex){
@@ -9077,6 +9245,7 @@ btnJoin.addEventListener('click', async () => {
   subscribePlayers();
   subscribeHands();
   subscribePlayed();
+  subscribeSp1Boosted();
   subscribeDeck();
   subscribeRuins();
 
@@ -9089,6 +9258,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeEffect4();
   subscribeEffectKt2();
   subscribeEffect6();
+  subscribeEffectSp1();
   subscribeEffectKt6();
   subscribeEffect7();
   subscribeEffect8();
@@ -9667,9 +9837,11 @@ function renderPlayerCircle(players){
   const e3MineSelecting = !!(state.effect3 && state.effect3.playerId === state.userId && state.effect3.phase === 'select');
   const e4MineSelecting = !!(state.effect4 && state.effect4.playerId === state.userId && state.effect4.phase === 'select');
   const e8MineSelecting = !!(state.effect8 && state.effect8.playerId === state.userId && state.effect8.phase === 'select');
+  const sp1MineSelecting = !!(state.effectSp1 && state.effectSp1.playerId === state.userId && state.effectSp1.phase === 'selectTarget');
   const kt2MineSelecting = !!(state.effectKt2 && state.effectKt2.playerId === state.userId && state.effectKt2.phase === 'select');
   const kt6MineSelectingDiscard = !!(state.effectKt6 && state.effectKt6.playerId === state.userId && state.effectKt6.phase === 'selectDiscard');
   const pickMode = (e3MineSelecting || e4MineSelecting || e8MineSelecting) && !state.gameOver;
+  const sp1Candidates = (sp1MineSelecting && Array.isArray(state.effectSp1?.candidatePlayerIds)) ? state.effectSp1.candidatePlayerIds : [];
 
   players.forEach((p, idx) => {
     const k = (meIndex === -1) ? idx : (idx - meIndex + n) % n;
@@ -9715,6 +9887,13 @@ function renderPlayerCircle(players){
       // ★③/④選択中（使用者のみ）→ 他プレイヤーの扇をクリック可
       if (pickMode && !isElim){
         fan.classList.add('pick-mode');
+      }
+      if (sp1MineSelecting && !isElim && sp1Candidates.includes(p.id)){
+        fan.classList.add('sp1-target-pickable');
+        fan.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          await handleSp1TargetPick(p.id);
+        }, { once:true });
       }
 
       const handData = state.hands[p.id];
@@ -9822,6 +10001,13 @@ function renderPlayerCircle(players){
           if (target) showKickDialog(target);
         });
       }
+      if (sp1MineSelecting && !isElim && sp1Candidates.includes(p.id)){
+        name.classList.add('sp1-target-pickable');
+        name.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          await handleSp1TargetPick(p.id);
+        }, { once:true });
+      }
 
       fan.appendChild(miniHand);
       fan.appendChild(name);
@@ -9890,6 +10076,12 @@ function renderPlayerCircle(players){
 
         if (isUsedKt1){
           c.classList.add('kt1-used');
+        }
+
+        const isSp1BoostedPlayer = !!state.sp1Boosted?.[p.id];
+        const normalizedPlayed = normalizeCardValue(v);
+        if (isSp1BoostedPlayer && (normalizedPlayed === 'x' || normalizedPlayed === 'ktx')){
+          c.classList.add('sp1-boosted');
         }
 
         c.addEventListener('pointerdown', (ev) => startZoomTap(ev, c));
@@ -9988,7 +10180,9 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effect7`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectSp1`), null),
 
+    set(ref(db, `rooms/${state.roomCode}/sp1Boosted`), {}),
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
     set(ref(db, `rooms/${state.roomCode}/gameOver`), null),
@@ -10056,6 +10250,8 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effect7`)),
     remove(ref(db, `${base}/effect8`)),
     remove(ref(db, `${base}/effectKt2`)),
+    remove(ref(db, `${base}/effectSp1`)),
+    remove(ref(db, `${base}/sp1Boosted`)),
 
     remove(ref(db, `${base}/eliminated`)),
     remove(ref(db, `${base}/kt1Revived`)),
