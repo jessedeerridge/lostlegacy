@@ -9044,24 +9044,31 @@ async function moveAllHandCardsToRuinsForSp1(playerId){
   }, { applyLocally:false });
   if (!handRes.committed || !removed.length) return [];
 
-  const ruinsRef = ref(db, `rooms/${state.roomCode}/ruins`);
+  const ruinsSnap = await get(ref(db, `rooms/${state.roomCode}/ruins`));
+  const ruinsRaw = Array.isArray(ruinsSnap.val()) ? ruinsSnap.val() : [];
+  const plannedSlots = new Array(RUINS_SLOT_COUNT).fill(null);
+  for (let i=0;i<RUINS_SLOT_COUNT;i++) plannedSlots[i] = (ruinsRaw[i] === undefined ? null : ruinsRaw[i]);
+
+  const placementPlan = [];
+  for (const card of removed){
+    const slotIndex = firstEmptyRuinSlotIndex(plannedSlots);
+    if (slotIndex === null) break;
+    plannedSlots[slotIndex] = { v: String(card), by: playerId, at: Date.now() };
+    placementPlan.push({ card: String(card), slotIndex });
+  }
+
   const placed = [];
-  await runTransaction(ruinsRef, (ruins) => {
-    const src = Array.isArray(ruins) ? [...ruins] : [];
-    const slots = new Array(RUINS_SLOT_COUNT).fill(null);
-    for (let i=0;i<RUINS_SLOT_COUNT;i++) slots[i] = (src[i] === undefined ? null : src[i]);
-
-    for (const card of removed){
-      const idx = firstEmptyRuinSlotIndex(slots);
-      if (idx === null) break;
-      slots[idx] = { v: String(card), by: playerId, at: Date.now() };
-      placed.push({ card: String(card), slotIndex: idx });
-    }
-    return slots;
-  }, { applyLocally:false });
-
-  for (const item of placed){
+  for (const item of placementPlan){
     await emitRuinMoveEvent(playerId, item.card, item.slotIndex, 'sp1');
+    await sleep(RUIN_MOVE_ANIM_MS);
+
+    const slotRef = ref(db, `rooms/${state.roomCode}/ruins/${item.slotIndex}`);
+    const slotRes = await runTransaction(slotRef, (slot) => {
+      if (slot) return slot;
+      return { v: String(item.card), by: playerId, at: Date.now() };
+    }, { applyLocally:false });
+
+    if (slotRes.committed) placed.push(item);
   }
 
   const overflow = removed.slice(placed.length);
@@ -9080,7 +9087,6 @@ async function runSp1EliminationAndAdvance(targetPlayerId){
   if (!state.roomCode || !targetPlayerId) return;
 
   await moveAllHandCardsToRuinsForSp1(targetPlayerId);
-  await sleep(RUIN_MOVE_ANIM_MS);
   await eliminatePlayerWithKt1Check(targetPlayerId, state.turn?.turnSeq);
 
   await set(ref(db, `rooms/${state.roomCode}/effect8`), null);
