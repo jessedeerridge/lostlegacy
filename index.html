@@ -445,8 +445,7 @@
     outline-offset:1px;
   }
   .played-card.sp1-boosted{
-    transform:scale(1.2) !important;
-    transform-origin:center;
+    scale:1.2;
   }
   .played-card.drag-source-hidden{
     opacity:0 !important;
@@ -2608,6 +2607,16 @@ function getActionHintData(){
         ? '数字を宣言して、見たいカードを選んでください。'
         : '数字を宣言して、カードを見る。当たっていればそのプレイヤーを脱落させる。'
     };
+  }
+
+  if (ef8 && String(ef8.mode || 'normal') === 'sp1'){
+    const mine = ef8.playerId === myId;
+    if (!mine) return { mine, text: '捨て札に✕があるプレイヤーを1人脱落させます。' };
+    const targets = Array.isArray(ef8.targetPlayerIds) ? ef8.targetPlayerIds : [];
+    if (ef8.phase === 'sp1SelectKill' && targets.length >= 2){
+      return { mine, text: '脱落させたいプレイヤーを選んでください。' };
+    }
+    return { mine, text: '' };
   }
 
   if (ef8 && String(ef8.mode || 'normal') !== 'kt8'){
