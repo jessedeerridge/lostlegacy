@@ -1588,8 +1588,8 @@
     <button id="btnStartPopClose" class="btn ghost" style="padding:2px 6px;font-size:12px;">×</button>
   </div>
   <div class="start-pop-main">
-    「スタート」で <b>手札(各1枚)</b> を配布し、<br>
-    さらに <b>最初のプレイヤーに1枚ドロー</b> します。<br>
+    「スタート」で <b>山札から1枚を裏向きで遺跡1枚目へ配置</b> し、<br>
+    その後に <b>手札(各1枚)</b> を配布して、さらに <b>最初のプレイヤーに1枚ドロー</b> します。<br>
     ※「自分の手番」かつ「手札が2枚」の時だけ、パルス＆ドラッグ可。<br>
     ※ドロー演出は <b>全員の画面</b> に出ます。<br>
     ★ 今回：<b>ドロー演出が終わってから</b> 手札が増えます（重複見え防止）。<br>
@@ -3952,8 +3952,12 @@ function subscribeRuinMoveEvent(){
     const byPlayerId = String(ev.byPlayerId || '');
 
     if (!fromPid) return;
-    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played' && mode !== 'kt6Deck' && mode !== 'kt6DiscardPlayed') return;
+    if (fromPid === state.userId && mode !== 'oneReveal' && mode !== 'xReveal' && mode !== 'kt8' && mode !== 'ktxElimination' && mode !== 'kt5Played' && mode !== 'kt6Deck' && mode !== 'kt6DiscardPlayed' && mode !== 'startDeck') return;
 
+    if (mode === 'startDeck'){
+      animateMoveFromDeckToRuin(slotIndex, String(cardValue ?? ''), { faceUp:false });
+      return;
+    }
     if (mode === 'oneReveal' || mode === 'kt8'){
       animateOneRevealMoveToRuin(fromPid, String(cardValue ?? ''), slotIndex);
       if (pendingOneRevealTarget && pendingOneRevealTarget.playerId === fromPid){
@@ -9923,6 +9927,9 @@ async function dealAllCardsAndInitialDraw(){
   const deckRaw = buildDeckForPlayers(playerCount);
   shuffleInPlace(deckRaw);
 
+  const firstRuinCard = deckRaw.shift();
+  const firstRuinCardDisp = (firstRuinCard !== undefined) ? toDisplayValue(firstRuinCard) : null;
+
   const hands = {};
   for (let i=0;i<players.length;i++){
     const p = players[i];
@@ -9938,7 +9945,7 @@ async function dealAllCardsAndInitialDraw(){
   const initialDrawDisp = (initialDraw !== undefined) ? toDisplayValue(initialDraw) : null;
 
   await Promise.all([
-    set(ref(db, `rooms/${state.roomCode}/hands`), hands),
+    set(ref(db, `rooms/${state.roomCode}/hands`), {}),
     set(ref(db, `rooms/${state.roomCode}/played`), {}),
     set(ref(db, `rooms/${state.roomCode}/ruins`), new Array(RUINS_SLOT_COUNT).fill(null)),
 
@@ -9971,6 +9978,17 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/kt4ShuffleEvent`), null),
     set(ref(db, `rooms/${state.roomCode}/kt2ShuffleEvent`), null),
   ]);
+
+  if (firstRuinCardDisp){
+    await emitRuinMoveEvent(state.userId, firstRuinCardDisp, 0, 'startDeck');
+    await sleep(RUIN_MOVE_ANIM_MS + 40);
+
+    const localRuins = new Array(RUINS_SLOT_COUNT).fill(null);
+    localRuins[0] = { v:firstRuinCardDisp, by:state.userId, at:Date.now() };
+    await set(ref(db, `rooms/${state.roomCode}/ruins`), localRuins);
+  }
+
+  await set(ref(db, `rooms/${state.roomCode}/hands`), hands);
 
   if (initialDrawDisp){
     await emitDrawEvent(firstPlayerId, 1, 'initial');
