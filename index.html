@@ -3173,6 +3173,12 @@ function playerHandHasX(playerId){
   return cards.some((v) => normalizeCardValue(v) === 'x');
 }
 
+function playerDiscardHasSp4(playerId){
+  if (playerId === null || playerId === undefined) return false;
+  const playedCards = Array.isArray(state.played?.[playerId]) ? state.played[playerId] : [];
+  return playedCards.some((v) => normalizeCardValue(v) === 'sp4');
+}
+
 async function runExplorationPhaseSequence(eventId){
   if (explorationSequenceActive) return;
   explorationSequenceActive = true;
@@ -3232,9 +3238,12 @@ async function runExplorationPhaseSequence(eventId){
         continue;
       }
 
-      const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
-      await handleExplorationSelection(selection?.value, { keepFront: true, explorerId: selection?.playerId || pid });
-      if (state.gameOver || explorationStopRequested) return;
+      const pickCount = playerDiscardHasSp4(pid) ? 2 : 1;
+      for (let pickNo = 0; pickNo < pickCount; pickNo += 1){
+        const selection = await waitForExplorationSelection(pid, { eventId, rank: group.rank });
+        await handleExplorationSelection(selection?.value, { keepFront: true, explorerId: selection?.playerId || pid });
+        if (state.gameOver || explorationStopRequested) return;
+      }
     }
   } finally {
     revealedPlayers.forEach((pid) => setPlayerHandReveal(pid, false, { keepFront: true }));
