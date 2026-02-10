@@ -2042,6 +2042,7 @@ const state = {
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
+  sp2Tracked: {},     // ★sp2所持履歴（捨て札に一度でも出た）
   gameOver: null,     // ★ゲーム終了
 
   turn: { currentPlayerId:null, turnSeq:0, drawn:false, paused:false },
@@ -2049,6 +2050,10 @@ const state = {
   isMyTurn: false,
   isPlayable: false,
 };
+
+const sp2SeenInPlayed = {};
+const sp2ReviveTimers = new Map();
+const sp2RemovalTimers = new Map();
 
 const ui = {
   effect2Selecting: false,
@@ -2763,6 +2768,9 @@ async function maybeDeclareLastSurvivor(){
   if (alive.length !== 1) return;
 
   const winner = alive[0];
+  clearSp2Timers();
+  Object.keys(sp2SeenInPlayed).forEach((k) => delete sp2SeenInPlayed[k]);
+
   await Promise.all([
     set(ref(db, `rooms/${state.roomCode}/gameOver`), {
       by: winner.id,
@@ -3426,6 +3434,7 @@ function subscribeHostState(){
   onValue(hostRef, snap => {
     const hostId = snap.val();
     state.isHost = (hostId === state.userId);
+    if (state.isHost) handleHostSp2State(); else clearSp2Timers();
     syncHelpConfigFromRoom();
     updateHostUI();
     syncSeatUI();
@@ -3436,6 +3445,7 @@ function subscribeHands(){
   const handsRef = ref(db, `rooms/${state.roomCode}/hands`);
   onValue(handsRef, snap => {
     state.hands = snap.val() || {};
+    if (state.isHost) handleHostSp2State();
     renderHands();
   });
 }
@@ -3444,7 +3454,103 @@ function subscribePlayed(){
   const pRef = ref(db, `rooms/${state.roomCode}/played`);
   onValue(pRef, snap => {
     state.played = snap.val() || {};
+    if (state.isHost) handleHostSp2State();
     renderHands();
+  });
+}
+
+function clearSp2Timers(){
+  sp2ReviveTimers.forEach((timerId) => clearTimeout(timerId));
+  sp2RemovalTimers.forEach((timerId) => clearTimeout(timerId));
+  sp2ReviveTimers.clear();
+  sp2RemovalTimers.clear();
+}
+
+function getHandCount(playerId){
+  const cards = state.hands?.[playerId]?.cards;
+  return Array.isArray(cards) ? cards.length : 0;
+}
+
+async function markSp2Tracked(playerId){
+  if (!state.roomCode || !playerId) return;
+  const trackedRef = ref(db, `rooms/${state.roomCode}/sp2Tracked/${playerId}`);
+  await runTransaction(trackedRef, (v) => v ? v : true, { applyLocally:false });
+}
+
+async function revivePlayerWithSp2(playerId){
+  if (!state.roomCode || !playerId) return;
+  if (!state.eliminated?.[playerId]) return;
+  if (getHandCount(playerId) !== 0) return;
+  if (!Array.isArray(state.played?.[playerId]) || !state.played[playerId].includes('sp2')) return;
+
+  const drawn = await drawOneFromDeckAtomic();
+  if (!drawn) return;
+
+  await emitDrawEvent(playerId, state.turn?.turnSeq, 'sp2Revive');
+  await sleep(DRAW_COMMIT_DELAY_MS);
+  await addCardToHandAtomic(playerId, drawn);
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
+}
+
+async function eliminatePlayerBySp2Removal(playerId){
+  if (!state.roomCode || !playerId) return;
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
+}
+
+function scheduleSp2Revive(playerId){
+  if (sp2ReviveTimers.has(playerId)) return;
+  const timerId = setTimeout(async () => {
+    sp2ReviveTimers.delete(playerId);
+    if (!state.isHost) return;
+    await revivePlayerWithSp2(playerId);
+  }, 1200);
+  sp2ReviveTimers.set(playerId, timerId);
+}
+
+function scheduleSp2RemovalElimination(playerId){
+  if (sp2RemovalTimers.has(playerId)) return;
+  const timerId = setTimeout(async () => {
+    sp2RemovalTimers.delete(playerId);
+    if (!state.isHost) return;
+    await eliminatePlayerBySp2Removal(playerId);
+  }, 1000);
+  sp2RemovalTimers.set(playerId, timerId);
+}
+
+function handleHostSp2State(){
+  const playerIds = new Set([
+    ...Object.keys(state.played || {}),
+    ...Object.keys(state.hands || {}),
+    ...Object.keys(state.eliminated || {}),
+    ...Object.keys(state.sp2Tracked || {}),
+    ...Object.keys(sp2SeenInPlayed),
+  ]);
+
+  playerIds.forEach((playerId) => {
+    const played = Array.isArray(state.played?.[playerId]) ? state.played[playerId] : [];
+    const hasSp2 = played.includes('sp2');
+    const wasSp2 = !!sp2SeenInPlayed[playerId];
+    sp2SeenInPlayed[playerId] = hasSp2;
+
+    if (hasSp2){
+      void markSp2Tracked(playerId);
+    }
+
+    const tracked = !!state.sp2Tracked?.[playerId] || hasSp2;
+    if (tracked && wasSp2 && !hasSp2){
+      scheduleSp2RemovalElimination(playerId);
+    } else if (hasSp2 && sp2RemovalTimers.has(playerId)){
+      clearTimeout(sp2RemovalTimers.get(playerId));
+      sp2RemovalTimers.delete(playerId);
+    }
+
+    const shouldRevive = hasSp2 && !!state.eliminated?.[playerId] && getHandCount(playerId) === 0;
+    if (shouldRevive){
+      scheduleSp2Revive(playerId);
+    } else if (sp2ReviveTimers.has(playerId)){
+      clearTimeout(sp2ReviveTimers.get(playerId));
+      sp2ReviveTimers.delete(playerId);
+    }
   });
 }
 
@@ -3470,8 +3576,19 @@ function subscribeEliminated(){
   const eRef = ref(db, `rooms/${state.roomCode}/eliminated`);
   onValue(eRef, snap => {
     state.eliminated = snap.val() || {};
+    if (state.isHost) handleHostSp2State();
     updateTurnUI();
     scheduleLastSurvivorCheck();
+  });
+}
+
+
+function subscribeSp2Tracked(){
+  const sRef = ref(db, `rooms/${state.roomCode}/sp2Tracked`);
+  onValue(sRef, snap => {
+    state.sp2Tracked = snap.val() || {};
+    if (state.isHost) handleHostSp2State();
+    renderHands();
   });
 }
 
@@ -9258,6 +9375,7 @@ btnJoin.addEventListener('click', async () => {
 
   subscribeEliminated();
   subscribeKt1Revived();
+  subscribeSp2Tracked();
   subscribeGameOver();
 
   subscribeEffect2();
@@ -10138,6 +10256,9 @@ function toDisplayValue(v){ return String(v); }
 async function dealAllCardsAndInitialDraw(){
   if (!state.roomCode) return;
 
+  clearSp2Timers();
+  Object.keys(sp2SeenInPlayed).forEach((k) => delete sp2SeenInPlayed[k]);
+
   resetExplorationState({ render:false });
 
   const tablesSnap = await get(ref(db, `rooms/${state.roomCode}/tables`));
@@ -10186,6 +10307,7 @@ async function dealAllCardsAndInitialDraw(){
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
+    set(ref(db, `rooms/${state.roomCode}/sp2Tracked`), {}),
     set(ref(db, `rooms/${state.roomCode}/gameOver`), null),
 
     set(ref(db, `rooms/${state.roomCode}/deck`), deckRaw.map(toDisplayValue)),
@@ -10254,6 +10376,7 @@ btnResetRoom.addEventListener('click', async () => {
 
     remove(ref(db, `${base}/eliminated`)),
     remove(ref(db, `${base}/kt1Revived`)),
+    remove(ref(db, `${base}/sp2Tracked`)),
     remove(ref(db, `${base}/gameOver`)),
 
     remove(ref(db, `${base}/turn`)),
@@ -10272,6 +10395,8 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/explorationPickEvent`)),
     remove(ref(db, `${base}/handTransferEvent`)),
   ]);
+  clearSp2Timers();
+  Object.keys(sp2SeenInPlayed).forEach((k) => delete sp2SeenInPlayed[k]);
   state.seatedTable = null;
   startPop.classList.add('hidden');
   resetExplorationState();
