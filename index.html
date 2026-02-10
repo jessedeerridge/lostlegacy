@@ -2054,6 +2054,7 @@ const state = {
 const sp2SeenInPlayed = {};
 const sp2ReviveTimers = new Map();
 const sp2RemovalTimers = new Map();
+let sp2ResetInProgress = false;
 
 const ui = {
   effect2Selecting: false,
@@ -2770,6 +2771,7 @@ async function maybeDeclareLastSurvivor(){
   const winner = alive[0];
   clearSp2Timers();
   Object.keys(sp2SeenInPlayed).forEach((k) => delete sp2SeenInPlayed[k]);
+  sp2ResetInProgress = false;
 
   await Promise.all([
     set(ref(db, `rooms/${state.roomCode}/gameOver`), {
@@ -3518,6 +3520,8 @@ function scheduleSp2RemovalElimination(playerId){
 }
 
 function handleHostSp2State(){
+  if (sp2ResetInProgress) return;
+
   const playerIds = new Set([
     ...Object.keys(state.played || {}),
     ...Object.keys(state.hands || {}),
@@ -10256,12 +10260,15 @@ function toDisplayValue(v){ return String(v); }
 async function dealAllCardsAndInitialDraw(){
   if (!state.roomCode) return;
 
+  sp2ResetInProgress = true;
   clearSp2Timers();
   Object.keys(sp2SeenInPlayed).forEach((k) => delete sp2SeenInPlayed[k]);
+  state.sp2Tracked = {};
 
   resetExplorationState({ render:false });
 
-  const tablesSnap = await get(ref(db, `rooms/${state.roomCode}/tables`));
+  try {
+    const tablesSnap = await get(ref(db, `rooms/${state.roomCode}/tables`));
   const tables = tablesSnap.val() || {};
   const players = Object.entries(tables)
     .map(([seatIndex, t]) => (t && t.playerId ? { seatIndex:Number(seatIndex), id:t.playerId, name:t.playerName||'名無し' } : null))
@@ -10343,6 +10350,9 @@ async function dealAllCardsAndInitialDraw(){
     await sleep(DRAW_COMMIT_DELAY_MS);
     await addCardToHandAtomic(firstPlayerId, initialDrawDisp);
   }
+  } finally {
+    sp2ResetInProgress = false;
+  }
 }
 
 hostSettingsBtn.addEventListener('click', () => { if (!state.isHost) return; startPop.classList.toggle('hidden'); });
@@ -10397,6 +10407,7 @@ btnResetRoom.addEventListener('click', async () => {
   ]);
   clearSp2Timers();
   Object.keys(sp2SeenInPlayed).forEach((k) => delete sp2SeenInPlayed[k]);
+  sp2ResetInProgress = false;
   state.seatedTable = null;
   startPop.classList.add('hidden');
   resetExplorationState();
