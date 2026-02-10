@@ -2043,6 +2043,7 @@ const state = {
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
   sp2Tracked: {},     // ★sp2所持履歴（捨て札に一度でも出た）
+  sp2Eliminated: {},  // ★sp2効果で脱落したプレイヤー
   gameOver: null,     // ★ゲーム終了
 
   turn: { currentPlayerId:null, turnSeq:0, drawn:false, paused:false },
@@ -2729,7 +2730,7 @@ function getCardRank(value){
 function getExplorationGroups(){
   const groups = new Map();
   latestPlayers.forEach((p) => {
-    if (state.eliminated?.[p.id]) return;
+    if (state.eliminated?.[p.id] && !state.sp2Eliminated?.[p.id]) return;
     const hand = state.hands?.[p.id];
     const cards = Array.isArray(hand?.cards) ? hand.cards : [];
     if (!cards.length) return;
@@ -3491,11 +3492,13 @@ async function revivePlayerWithSp2(playerId){
   await emitDrawEvent(playerId, state.turn?.turnSeq, 'sp2Revive');
   await sleep(DRAW_COMMIT_DELAY_MS);
   await addCardToHandAtomic(playerId, drawn);
+  await set(ref(db, `rooms/${state.roomCode}/sp2Eliminated/${playerId}`), null);
   await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
 }
 
 async function eliminatePlayerBySp2Removal(playerId){
   if (!state.roomCode || !playerId) return;
+  await set(ref(db, `rooms/${state.roomCode}/sp2Eliminated/${playerId}`), true);
   await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
 }
 
@@ -3592,6 +3595,15 @@ function subscribeSp2Tracked(){
   onValue(sRef, snap => {
     state.sp2Tracked = snap.val() || {};
     if (state.isHost) handleHostSp2State();
+    renderHands();
+  });
+}
+
+
+function subscribeSp2Eliminated(){
+  const sRef = ref(db, `rooms/${state.roomCode}/sp2Eliminated`);
+  onValue(sRef, snap => {
+    state.sp2Eliminated = snap.val() || {};
     renderHands();
   });
 }
@@ -7450,6 +7462,7 @@ async function tryReviveWithKt1(playerId, seq = null){
   await sleep(DRAW_COMMIT_DELAY_MS);
   await addCardToHandAtomic(playerId, drawn);
 
+  await set(ref(db, `rooms/${state.roomCode}/sp2Eliminated/${playerId}`), null);
   await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
   if (state.eliminated?.[playerId]){
     const nextEliminated = { ...(state.eliminated || {}) };
@@ -7467,6 +7480,7 @@ async function eliminatePlayerWithKt1Check(playerId, seq = null){
 
   // タグ表示を先に切り替えて体感遅延を減らす
   state.eliminated = { ...(state.eliminated || {}), [playerId]: true };
+  await set(ref(db, `rooms/${state.roomCode}/sp2Eliminated/${playerId}`), null);
   await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
   return true;
 }
@@ -9380,6 +9394,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeEliminated();
   subscribeKt1Revived();
   subscribeSp2Tracked();
+  subscribeSp2Eliminated();
   subscribeGameOver();
 
   subscribeEffect2();
@@ -10014,8 +10029,10 @@ function renderPlayerCircle(players){
         if (e8drag.overTarget) fan.classList.add('effect8-drop-active');
       }
 
+      const canPickElimBySp2ForE3 = !!(e3MineSelecting && isElim && state.sp2Eliminated?.[p.id]);
+
       // ★③/④選択中（使用者のみ）→ 他プレイヤーの扇をクリック可
-      if (pickMode && !isElim){
+      if (pickMode && (!isElim || canPickElimBySp2ForE3)){
         fan.classList.add('pick-mode');
       }
       if (sp1MineSelectingKill && !isElim && sp1TargetPlayerIds.includes(String(p.id))){
@@ -10086,7 +10103,7 @@ function renderPlayerCircle(players){
         card.addEventListener('pointerdown', (ev) => startZoomTap(ev, card));
 
         // ★③/④：使用者が選択中なら pickable
-        if (pickMode && !isElim){
+        if (pickMode && (!isElim || canPickElimBySp2ForE3)){
           card.classList.add('pickable');
 
           // ここでカードを選ぶ（クリックしたカード番号を「そのまま index」として扱う）
@@ -10264,6 +10281,7 @@ async function dealAllCardsAndInitialDraw(){
   clearSp2Timers();
   Object.keys(sp2SeenInPlayed).forEach((k) => delete sp2SeenInPlayed[k]);
   state.sp2Tracked = {};
+  state.sp2Eliminated = {};
 
   resetExplorationState({ render:false });
 
@@ -10315,6 +10333,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
     set(ref(db, `rooms/${state.roomCode}/sp2Tracked`), {}),
+    set(ref(db, `rooms/${state.roomCode}/sp2Eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/gameOver`), null),
 
     set(ref(db, `rooms/${state.roomCode}/deck`), deckRaw.map(toDisplayValue)),
@@ -10387,6 +10406,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/eliminated`)),
     remove(ref(db, `${base}/kt1Revived`)),
     remove(ref(db, `${base}/sp2Tracked`)),
+    remove(ref(db, `${base}/sp2Eliminated`)),
     remove(ref(db, `${base}/gameOver`)),
 
     remove(ref(db, `${base}/turn`)),
