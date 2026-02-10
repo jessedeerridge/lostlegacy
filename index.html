@@ -10215,6 +10215,12 @@ function toDisplayValue(v){ return String(v); }
 async function dealAllCardsAndInitialDraw(){
   if (!state.roomCode) return;
 
+  // スタート時に全員の脱落状態を即時リセット
+  state.eliminated = {};
+  updateTurnUI();
+  renderHands();
+  await set(ref(db, `rooms/${state.roomCode}/eliminated`), {});
+
   // 前ゲームのsp2監視状態を完全リセット（誤脱落防止）
   resetSp2AutoEffectState();
   resetExplorationState({ render:false });
