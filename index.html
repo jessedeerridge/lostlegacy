@@ -3506,6 +3506,11 @@ function clearAllSp2Timers(){
   sp2LossTimers.clear();
 }
 
+function resetSp2AutoEffectState(){
+  clearAllSp2Timers();
+  Object.keys(sp2HasCache).forEach((pid) => { delete sp2HasCache[pid]; });
+}
+
 async function runSp2Revive(playerId){
   clearSp2Timer(sp2ReviveTimers, playerId);
   if (!state.isHost || !state.roomCode || state.gameOver) return;
@@ -3525,15 +3530,17 @@ async function runSp2Revive(playerId){
   if (!drawn) return;
 
   await emitDrawEvent(playerId, state.turn?.turnSeq, 'sp2Revive');
-  await sleep(DRAW_COMMIT_DELAY_MS);
-  await addCardToHandAtomic(playerId, drawn);
 
+  // 先に脱落解除して、復帰ドロー後のカードが薄く表示されないようにする
   await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
   if (state.eliminated?.[playerId]){
     const nextEliminated = { ...(state.eliminated || {}) };
     delete nextEliminated[playerId];
     state.eliminated = nextEliminated;
   }
+
+  await sleep(DRAW_COMMIT_DELAY_MS);
+  await addCardToHandAtomic(playerId, drawn);
 }
 
 async function runSp2LossElimination(playerId){
@@ -10208,6 +10215,8 @@ function toDisplayValue(v){ return String(v); }
 async function dealAllCardsAndInitialDraw(){
   if (!state.roomCode) return;
 
+  // 前ゲームのsp2監視状態を完全リセット（誤脱落防止）
+  resetSp2AutoEffectState();
   resetExplorationState({ render:false });
 
   const tablesSnap = await get(ref(db, `rooms/${state.roomCode}/tables`));
@@ -10304,6 +10313,7 @@ btnGameStart.addEventListener('click', async () => {
 
 btnResetRoom.addEventListener('click', async () => {
   if (!state.isHost || !state.roomCode) return;
+  resetSp2AutoEffectState();
   const base = `rooms/${state.roomCode}`;
   await Promise.all([
     remove(ref(db, `${base}/maxPlayers`)),
