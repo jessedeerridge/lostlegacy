@@ -1712,6 +1712,10 @@ const CARD_META = {
   "kt7": { name: "語り部", reading: "かたりべ" },
   "kt8": { name: "呪い", reading: "のろい" },
   "ktx": { name: "負傷", reading: "ふしょう" },
+  "sp1": { name: "暗殺者", reading: "" },
+  "sp2": { name: "吸血鬼", reading: "" },
+  "sp3": { name: "吸血鬼狩り", reading: "" },
+  "sp4": { name: "転生者", reading: "" },
 };
 
 function normalizeCardValue(value){
@@ -1774,6 +1778,14 @@ function getCardEffectText(value){
       return '5と✕以外の数字を宣言して誰かのカードを見る。当たっているならそのカードを遺跡に置く。そのプレイヤーを脱落させる。';
     case 'ktx':
       return '捨て札にこのカードが2枚あれば、手札を遺跡に置いて、脱落する。';
+    case 'sp1':
+      return '他プレイヤーの捨て札に✕のカードがあれば、そのプレイヤーの手札を遺跡に置かせる。そのプレイヤーを脱落させる。';
+    case 'sp2':
+      return '捨て札にこのカードがあれば、脱落した時に山札から1枚引いて復帰できる。このカードが捨て札からなくなると、脱落する。';
+    case 'sp3':
+      return 'あなたを含む捨て札から1枚をとる。その後、手札から1枚選んで山札の一番上に置く。';
+    case 'sp4':
+      return '捨て札にこのカードがあれば、探索フェイズで2枚選べる。';
     default:
       return '';
   }
@@ -1802,6 +1814,10 @@ function getCardDecorCount(value){
     case 'kt3':
     case 'kt4':
     case 'kt5':
+    case 'sp1':
+    case 'sp2':
+    case 'sp3':
+    case 'sp4':
       return 1;
     default:
       return 0;
@@ -1890,9 +1906,11 @@ function setCardFace(el, value){
   }
 
   const meta = getCardMeta(key);
-  const displayNumber = key === 'x' ? '×' : (key.startsWith('kt') ? key.replace('kt', '') : key);
-  // 空中庭園のカード画像はkt+数字.jpg
-  if (key.startsWith('kt')) {
+  const displayNumber = key === 'x'
+    ? '×'
+    : (key.startsWith('kt') ? key.replace('kt', '') : (key.startsWith('sp') ? key.replace('sp', '') : key));
+  // 空中庭園・拡張のカード画像は {key}.jpg
+  if (key.startsWith('kt') || key.startsWith('sp')) {
     el.style.setProperty('--card-image', `url('${key}.jpg')`);
   } else {
     el.style.setProperty('--card-image', `url('lr${key}.jpg')`);
@@ -2175,6 +2193,19 @@ const DECK_SETS = [
     helpRows: [
       ["kt1","kt2","kt3","kt4","kt5"],
       ["kt6","kt7","kt8","ktx"],
+    ],
+  },
+  {
+    id: 'expansion',
+    name: '拡張',
+    cardPool: {
+      'sp1': 1,
+      'sp2': 1,
+      'sp3': 1,
+      'sp4': 1,
+    },
+    helpRows: [
+      ['sp1','sp2','sp3','sp4'],
     ],
   },
 ];
