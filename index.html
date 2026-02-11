@@ -1804,7 +1804,7 @@ function getCardEffectText(value){
     case 'sp1':
       return '他プレイヤー捨て札の✕/kt✕を1.2倍表示。該当1人なら1秒後にその人の手札を空き遺跡へ移し脱落。複数なら対象を選ぶ。';
     case 'sp2':
-      return '捨て札にこのカードがあれば、脱落した時に山札から1枚引いて復帰できる。このカードが捨て札からなくなると、脱落する。';
+      return '捨て札にこのカードがある状態で脱落して手札0枚になるたび、1.2秒後に山札から1枚引いて復帰する。このカードが捨て札からなくなったら、1秒後に脱落する。';
     case 'sp3':
       return 'あなたを含む捨て札から1枚をとる。その後、手札から1枚選んで山札の一番上に置く。';
     case 'sp4':
@@ -2027,6 +2027,8 @@ const EFFECT4_X_GLOBAL_MS = 1600;
 const EFFECT4_X_AFTER_CLOSE_DELAY_MS = 1500;
 const EFFECT4_X_HAND_REVEAL_MS = 1200;
 const EFFECT4_X_HAND_RETURN_MS = 300;
+const SP2_REVIVE_DELAY_MS = 1200;
+const SP2_LOSS_ELIM_DELAY_MS = 1000;
 
 const state = {
   userId: savedUserId,
@@ -2112,6 +2114,10 @@ const ui = {
   confirmAction: null,
   confirmNoAction: null,
 };
+
+const sp2ReviveTimers = new Map();
+const sp2LossTimers = new Map();
+const sp2HasCache = {};
 
 const mainEl = document.getElementById('main');
 const joinBox = document.getElementById('joinBox');
@@ -3492,6 +3498,7 @@ function subscribeHostState(){
     syncHelpConfigFromRoom();
     updateHostUI();
     syncSeatUI();
+    reconcileSp2AutoEffects();
   });
 }
 
@@ -3500,6 +3507,7 @@ function subscribeHands(){
   onValue(handsRef, snap => {
     state.hands = snap.val() || {};
     renderHands();
+    reconcileSp2AutoEffects();
   });
 }
 
@@ -3508,6 +3516,7 @@ function subscribePlayed(){
   onValue(pRef, snap => {
     state.played = snap.val() || {};
     renderHands();
+    reconcileSp2AutoEffects();
   });
 }
 
@@ -3535,6 +3544,7 @@ function subscribeEliminated(){
     state.eliminated = snap.val() || {};
     updateTurnUI();
     scheduleLastSurvivorCheck();
+    reconcileSp2AutoEffects();
   });
 }
 
@@ -3544,6 +3554,109 @@ function subscribeKt1Revived(){
     state.kt1Revived = snap.val() || {};
     renderHands();
   });
+}
+
+function clearSp2Timer(map, playerId){
+  if (!map.has(playerId)) return;
+  clearTimeout(map.get(playerId));
+  map.delete(playerId);
+}
+
+function clearAllSp2Timers(){
+  for (const t of sp2ReviveTimers.values()) clearTimeout(t);
+  for (const t of sp2LossTimers.values()) clearTimeout(t);
+  sp2ReviveTimers.clear();
+  sp2LossTimers.clear();
+}
+
+function resetSp2AutoEffectState(){
+  clearAllSp2Timers();
+  Object.keys(sp2HasCache).forEach((pid) => { delete sp2HasCache[pid]; });
+}
+
+async function runSp2Revive(playerId){
+  clearSp2Timer(sp2ReviveTimers, playerId);
+  if (!state.isHost || !state.roomCode || state.gameOver) return;
+
+  const [playedSnap, handSnap, elimSnap] = await Promise.all([
+    get(ref(db, `rooms/${state.roomCode}/played/${playerId}`)),
+    get(ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`)),
+    get(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`)),
+  ]);
+
+  const played = Array.isArray(playedSnap.val()) ? playedSnap.val().map(v => String(v)) : [];
+  const handCards = Array.isArray(handSnap.val()) ? handSnap.val() : [];
+  const eliminated = !!elimSnap.val();
+  if (!played.includes('sp2') || handCards.length !== 0 || !eliminated) return;
+
+  const drawn = await drawOneFromDeckAtomic();
+  if (!drawn) return;
+
+  await emitDrawEvent(playerId, state.turn?.turnSeq, 'sp2Revive');
+
+  // 先に脱落解除して、復帰ドロー後のカードが薄く表示されないようにする
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
+  if (state.eliminated?.[playerId]){
+    const nextEliminated = { ...(state.eliminated || {}) };
+    delete nextEliminated[playerId];
+    state.eliminated = nextEliminated;
+  }
+
+  await sleep(DRAW_COMMIT_DELAY_MS);
+  await addCardToHandAtomic(playerId, drawn);
+}
+
+async function runSp2LossElimination(playerId){
+  clearSp2Timer(sp2LossTimers, playerId);
+  if (!state.isHost || !state.roomCode || state.gameOver) return;
+
+  const playedSnap = await get(ref(db, `rooms/${state.roomCode}/played/${playerId}`));
+  const played = Array.isArray(playedSnap.val()) ? playedSnap.val().map(v => String(v)) : [];
+  if (played.includes('sp2')) return;
+
+  state.eliminated = { ...(state.eliminated || {}), [playerId]: true };
+  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
+}
+
+function reconcileSp2AutoEffects(){
+  if (!state.roomCode || state.gameOver || !state.isHost){
+    clearAllSp2Timers();
+    return;
+  }
+
+  const ids = new Set([
+    ...(latestPlayers || []).map(p => p.id),
+    ...Object.keys(state.played || {}),
+    ...Object.keys(state.hands || {}),
+    ...Object.keys(state.eliminated || {}),
+    ...Object.keys(sp2HasCache || {}),
+  ].filter(Boolean));
+
+  for (const pid of ids){
+    const played = Array.isArray(state.played?.[pid]) ? state.played[pid].map(v => String(v)) : [];
+    const handCount = Array.isArray(state.hands?.[pid]?.cards) ? state.hands[pid].cards.length : 0;
+    const eliminated = !!state.eliminated?.[pid];
+    const hasSp2 = played.includes('sp2');
+    const prevHasSp2 = !!sp2HasCache[pid];
+
+    if (hasSp2 && eliminated && handCount === 0){
+      if (!sp2ReviveTimers.has(pid)){
+        sp2ReviveTimers.set(pid, setTimeout(() => { runSp2Revive(pid); }, SP2_REVIVE_DELAY_MS));
+      }
+    } else {
+      clearSp2Timer(sp2ReviveTimers, pid);
+    }
+
+    if (prevHasSp2 && !hasSp2){
+      if (!sp2LossTimers.has(pid)){
+        sp2LossTimers.set(pid, setTimeout(() => { runSp2LossElimination(pid); }, SP2_LOSS_ELIM_DELAY_MS));
+      }
+    } else if (hasSp2) {
+      clearSp2Timer(sp2LossTimers, pid);
+    }
+
+    sp2HasCache[pid] = hasSp2;
+  }
 }
 
 function subscribeGameOver(){
@@ -3559,6 +3672,7 @@ function subscribeGameOver(){
       cleanupExplorationSelection();
     }
     updateTurnUI();
+    reconcileSp2AutoEffects();
   });
 }
 
@@ -7496,46 +7610,8 @@ async function discardHandToPlayed(playerId){
   return removed;
 }
 
-async function tryReviveWithKt1(playerId, seq = null){
-  if (!state.roomCode || !playerId) return false;
-
-  const playedSnap = await get(ref(db, `rooms/${state.roomCode}/played/${playerId}`));
-  const played = Array.isArray(playedSnap.val()) ? playedSnap.val() : [];
-  if (!played.includes('kt1')) return false;
-
-  const revivedRef = ref(db, `rooms/${state.roomCode}/kt1Revived/${playerId}`);
-  let canRevive = false;
-  const lockRes = await runTransaction(revivedRef, (used) => {
-    if (used) return used;
-    canRevive = true;
-    return true;
-  }, { applyLocally:false });
-  if (!lockRes.committed || !canRevive) return false;
-
-  const drawn = await drawOneFromDeckAtomic();
-  if (!drawn){
-    await set(revivedRef, null);
-    return false;
-  }
-
-  await emitDrawEvent(playerId, seq, 'kt1Revive');
-  await sleep(DRAW_COMMIT_DELAY_MS);
-  await addCardToHandAtomic(playerId, drawn);
-
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
-  if (state.eliminated?.[playerId]){
-    const nextEliminated = { ...(state.eliminated || {}) };
-    delete nextEliminated[playerId];
-    state.eliminated = nextEliminated;
-  }
-
-  return true;
-}
-
 async function eliminatePlayerWithKt1Check(playerId, seq = null){
   if (!state.roomCode || !playerId) return false;
-  const revived = await tryReviveWithKt1(playerId, seq);
-  if (revived) return false;
 
   // タグ表示を先に切り替えて体感遅延を減らす
   state.eliminated = { ...(state.eliminated || {}), [playerId]: true };
@@ -9809,6 +9885,7 @@ function subscribePlayers(){
     await syncSeatUI();
     renderPlayerCircle(players);
     scheduleLastSurvivorCheck();
+    reconcileSp2AutoEffects();
   });
 }
 
@@ -10450,6 +10527,14 @@ function toDisplayValue(v){ return String(v); }
 async function dealAllCardsAndInitialDraw(){
   if (!state.roomCode) return;
 
+  // スタート時に全員の脱落状態を即時リセット
+  state.eliminated = {};
+  updateTurnUI();
+  renderHands();
+  await set(ref(db, `rooms/${state.roomCode}/eliminated`), {});
+
+  // 前ゲームのsp2監視状態を完全リセット（誤脱落防止）
+  resetSp2AutoEffectState();
   resetExplorationState({ render:false });
 
   const tablesSnap = await get(ref(db, `rooms/${state.roomCode}/tables`));
@@ -10547,6 +10632,7 @@ btnGameStart.addEventListener('click', async () => {
 
 btnResetRoom.addEventListener('click', async () => {
   if (!state.isHost || !state.roomCode) return;
+  resetSp2AutoEffectState();
   const base = `rooms/${state.roomCode}`;
   await Promise.all([
     remove(ref(db, `${base}/maxPlayers`)),
