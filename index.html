@@ -444,6 +444,16 @@
     outline:2px solid rgba(37,99,235,.55);
     outline-offset:1px;
   }
+  .played-card.sp3-pickable{
+    cursor:grab;
+    touch-action:none;
+    animation: kt6PlayedPulse 760ms ease-in-out infinite;
+    transform-origin:center center;
+  }
+  .played-card.sp3-pickable:hover{
+    outline:2px solid rgba(37,99,235,.55);
+    outline-offset:1px;
+  }
   .played-card.sp1-boosted{
     scale:1.2;
   }
@@ -2040,6 +2050,7 @@ const state = {
   effectKt2: null,
   effectKt7: null,
   effectKt6: null,
+  effectSp3: null,
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
@@ -2085,6 +2096,9 @@ const ui = {
   effectSp1TargetPlayerIds: [],
 
   effectKt2Selecting: false,
+
+  effectSp3Picking: false,
+  effectSp3Returning: false,
 
   effectKt6SelectingDiscard: false,
   effectKt6TargetSlot: null,
@@ -2531,6 +2545,14 @@ function getActionHintData(){
         ? '捨て札のカードを選んで、山札に戻してください。'
         : '2 捨て札のカードを選んで、山札に戻す。'
     };
+  }
+
+  const sp3 = state.effectSp3;
+  if (sp3){
+    const mine = sp3.playerId === myId;
+    if (!mine) return { mine, text: 'sp3 捨て札から1枚とり、手札から1枚を山札に戻す。' };
+    if (sp3.phase === 'returnToDeck') return { mine, text: '手札から1枚を山札に戻してください。' };
+    return { mine, text: '捨て札から1枚を手札にとってください。' };
   }
 
   const ef2 = state.effect2;
@@ -3398,6 +3420,7 @@ function calcIsPlayable(){
   if (ui.effectKt7SelectingPair || ui.effectKt7Inspecting) return false;
   if (ui.effect8Selecting || ui.effect8Returning || ui.effectSp1SelectingKill) return false;
   if (ui.effectKt2Selecting) return false;
+  if (ui.effectSp3Picking || ui.effectSp3Returning) return false;
   if (ui.effectKt6SelectingDiscard) return false;
 
   // 脱落者は操作不可
@@ -3411,7 +3434,7 @@ function updateTurnUI(){
   state.isPlayable = calcIsPlayable();
 
   myHandEl.classList.toggle('is-playable', state.isPlayable);
-  myHandEl.classList.toggle('effect2-pick', ui.effect2Selecting);
+  myHandEl.classList.toggle('effect2-pick', ui.effect2Selecting || ui.effectSp3Returning);
   myHandEl.classList.toggle('effect6-pick', ui.effect6Selecting);
   myHandEl.classList.toggle('effect7-place', ui.effect7Placing || ui.effectKt3Returning);
   myHandEl.classList.toggle('effect8-return', ui.effect8Returning);
@@ -3655,6 +3678,37 @@ function subscribeEffectKt2(){
 
     updateTurnUI();
     renderHands();
+  });
+}
+
+
+function subscribeEffectSp3(){
+  const eRef = ref(db, `rooms/${state.roomCode}/effectSp3`);
+  onValue(eRef, snap => {
+    state.effectSp3 = snap.val() || null;
+
+    const mine = state.effectSp3 && state.effectSp3.playerId === state.userId;
+    const phase = state.effectSp3?.phase || null;
+    const picking = !!(mine && phase === 'selectDiscard');
+    const returning = !!(mine && phase === 'returnToDeck');
+
+    if (picking !== ui.effectSp3Picking || returning !== ui.effectSp3Returning){
+      ui.effectSp3Picking = picking;
+      ui.effectSp3Returning = returning;
+      if (!picking && sp3drag.active) cleanupSp3Drag();
+      if (!returning && e2drag.active) cleanupE2Drag();
+      updateTurnUI();
+      renderHands();
+      renderMyHand();
+    }
+
+    if (deckPile){
+      deckPile.title = returning ? '山札へドラッグして戻す（SP3）' : '山札';
+      if (!returning){
+        setDeckDropHint(false);
+        setDeckDropActive(false);
+      }
+    }
   });
 }
 
@@ -4284,6 +4338,7 @@ let e8drag = { active:false, cardIndex:null, pointerId:null, ghostEl:null, overT
 let kt6drag = { active:false, playerId:null, playedIndex:null, pointerId:null, ghostEl:null, overSlot:false, slotIndex:null, sourceEl:null };
 
 let kt2drag = { active:false, pointerId:null, ghostEl:null, sourceEl:null, overDeck:false, fromPlayerId:null, fromPlayedIndex:null };
+let sp3drag = { active:false, pointerId:null, ghostEl:null, sourceEl:null, overHand:false, fromPlayerId:null, fromPlayedIndex:null };
 
 
 function cleanupDrag(){
@@ -4453,6 +4508,93 @@ function onKt2PlayedPointerCancel(e){
   if (!kt2drag.active || kt2drag.pointerId !== e.pointerId) return;
   const cardEl = e.currentTarget;
   cleanupKt2Drag();
+  try { cardEl.releasePointerCapture(e.pointerId); } catch {}
+}
+
+
+function cleanupSp3Drag({ keepSourceHidden = false } = {}){
+  if (sp3drag.ghostEl) sp3drag.ghostEl.remove();
+  if (sp3drag.sourceEl && !keepSourceHidden) sp3drag.sourceEl.classList.remove('drag-source-hidden');
+  sp3drag.active = false;
+  sp3drag.pointerId = null;
+  sp3drag.ghostEl = null;
+  sp3drag.sourceEl = null;
+  sp3drag.overHand = false;
+  sp3drag.fromPlayerId = null;
+  sp3drag.fromPlayedIndex = null;
+  setHandDropActive(false);
+  setHandDropHint(false);
+}
+
+function onSp3PlayedPointerDown(e, cardEl){
+  if (!ui.effectSp3Picking) return;
+
+  const fromPid = String(cardEl?.dataset?.pid || '');
+  const fromIdx = Number(cardEl?.dataset?.playedIndex || cardEl?.dataset?.index || 0);
+  const cardValue = normalizeCardValue(cardEl?.dataset?.value || '');
+  if (!fromPid || !Number.isFinite(fromIdx) || cardValue === 'sp3') return;
+
+  startZoomTap(e, cardEl);
+  clearZoomTapState();
+
+  sp3drag.active = true;
+  sp3drag.pointerId = e.pointerId;
+  sp3drag.overHand = false;
+  sp3drag.fromPlayerId = fromPid;
+  sp3drag.fromPlayedIndex = fromIdx;
+  sp3drag.sourceEl = cardEl;
+
+  cardEl.classList.add('drag-source-hidden');
+
+  const ghost = document.createElement('div');
+  ghost.className = 'drag-ghost';
+  setCardFace(ghost, cardEl.dataset.value || cardEl.textContent || '');
+  document.body.appendChild(ghost);
+  sp3drag.ghostEl = ghost;
+
+  ghost.style.left = `${e.clientX}px`;
+  ghost.style.top  = `${e.clientY}px`;
+
+  setHandDropHint(true);
+  setHandDropActive(false);
+
+  cardEl.setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
+function onSp3PlayedPointerMove(e){
+  if (!sp3drag.active || sp3drag.pointerId !== e.pointerId || !sp3drag.ghostEl) return;
+  e.preventDefault();
+
+  sp3drag.ghostEl.style.left = `${e.clientX}px`;
+  sp3drag.ghostEl.style.top  = `${e.clientY}px`;
+
+  const rect = myHandRow.getBoundingClientRect();
+  const over = isPointInRect(e.clientX, e.clientY, rect);
+  sp3drag.overHand = over;
+  setHandDropActive(over);
+}
+
+async function onSp3PlayedPointerUp(e){
+  if (!sp3drag.active || sp3drag.pointerId !== e.pointerId) return;
+
+  const shouldDrop = sp3drag.overHand;
+  const fromPid = sp3drag.fromPlayerId;
+  const fromIdx = sp3drag.fromPlayedIndex;
+  const cardEl = e.currentTarget;
+
+  cleanupSp3Drag({ keepSourceHidden: shouldDrop });
+  try { cardEl.releasePointerCapture(e.pointerId); } catch {}
+
+  if (shouldDrop){
+    await handleSp3PickDiscard(fromPid, fromIdx, cardEl);
+  }
+}
+
+function onSp3PlayedPointerCancel(e){
+  if (!sp3drag.active || sp3drag.pointerId !== e.pointerId) return;
+  const cardEl = e.currentTarget;
+  cleanupSp3Drag();
   try { cardEl.releasePointerCapture(e.pointerId); } catch {}
 }
 
@@ -4654,7 +4796,7 @@ function onZoomTapEnd(e){
   const moved = zoomTapState.moved;
   clearZoomTapState();
   if (moved) return;
-  if (drag.active || e2drag.active || e6drag.active || e7drag.active || e7pickDrag.active || e8drag.active || kt2drag.active || kt6drag.active) return;
+  if (drag.active || e2drag.active || e6drag.active || e7drag.active || e7pickDrag.active || e8drag.active || kt2drag.active || kt6drag.active || sp3drag.active) return;
   openZoomFromCard(target);
 }
 
@@ -4682,8 +4824,9 @@ function onCardPointerDown(e){
   if (state.eliminated?.[state.userId]) return;
   if (ui.effect3Selecting || ui.effect4Selecting) return;
   if (ui.effect8Selecting) return;
+  if (ui.effectSp3Picking) return;
 
-  if (ui.effect2Selecting){
+  if (ui.effect2Selecting || ui.effectSp3Returning){
     const idx = Number(cardEl.dataset.index);
     if (!Number.isFinite(idx)) return;
 
@@ -4919,9 +5062,13 @@ async function onCardPointerUp(e){
     cleanupE2Drag({ keepSourceHidden: shouldDrop });
     try { cardEl.releasePointerCapture(e.pointerId); } catch {}
     if (shouldDrop){
-      ui.effect2SelectedIndex = idx;
-      ui.effect2DropPending = true;
-      await handleEffect2Pick(idx, cardEl);
+      if (ui.effectSp3Returning){
+        await handleSp3ReturnToDeck(idx, cardEl);
+      } else {
+        ui.effect2SelectedIndex = idx;
+        ui.effect2DropPending = true;
+        await handleEffect2Pick(idx, cardEl);
+      }
     }
     return;
   }
@@ -5163,7 +5310,7 @@ async function maybeAutoDrawAtTurnStart(){
   if (state.gameOver) return;
   if (state.eliminated?.[state.userId]) return;
 
-  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.effect7Picking || ui.effect7Placing || ui.effect8Selecting || ui.effect8Returning || ui.effectSp1SelectingKill || ui.effectKt6SelectingDiscard) return;
+  if (ui.effect2Selecting || ui.effect3Selecting || ui.effect4Selecting || ui.effect6Selecting || ui.effect7Picking || ui.effect7Placing || ui.effect8Selecting || ui.effect8Returning || ui.effectSp1SelectingKill || ui.effectKt6SelectingDiscard || ui.effectSp3Picking || ui.effectSp3Returning) return;
 
   autoDrawInFlight = true;
   const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
@@ -7113,6 +7260,10 @@ async function playCardFromHand(cardIndex){
     await resolveKt8(myId);
     return;
   }
+  if (usedKey === 'sp3'){
+    await resolveSp3(myId);
+    return;
+  }
   if (usedKey === 'sp1'){
     await resolveSp1(myId);
     return;
@@ -7248,6 +7399,7 @@ async function clearEffectsForOneReveal(){
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectSp3`), null),
   ]);
 }
 
@@ -7258,6 +7410,7 @@ async function clearEffectsForXReveal(){
     set(ref(db, `rooms/${state.roomCode}/effect4`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectSp3`), null),
   ]);
 }
 
@@ -7511,11 +7664,6 @@ async function handleEffect2Pick(cardIndex, cardEl){
   const myId = state.userId;
 
   // ★重要：先に「クリックしたカードのrect」を確保（再描画でDOMが消える前）
-  let fixedRect = null;
-  if (cardEl && cardEl.getBoundingClientRect){
-    const r = cardEl.getBoundingClientRect();
-    fixedRect = { left:r.left, top:r.top, width:r.width, height:r.height };
-  }
 
   // クリックしたカードを青枠に（少し見せる）
   ui.effect2SelectedIndex = cardIndex;
@@ -7543,12 +7691,6 @@ async function handleEffect2Pick(cardIndex, cardEl){
     return;
   }
 
-  if (!fixedRect){
-    const hr = myHandEl?.getBoundingClientRect?.();
-    if (hr){
-      fixedRect = { left: hr.left + hr.width*0.5, top: hr.top + hr.height*0.5, width: 60, height: 90 };
-    }
-  }
 
   // 自分：移動アニメなし（他プレイヤーは裏アニメのみ）
   // await animateReturnTopFromCardRectToDeck(fixedRect, pickedValue);
@@ -9135,6 +9277,122 @@ async function runSp1EliminationAndAdvance(targetPlayerId){
   await advanceTurnToNextPlayer();
 }
 
+
+function getSp3PickablePlayedEntries(){
+  const entries = [];
+  const src = (state.played && typeof state.played === 'object') ? state.played : {};
+  Object.entries(src).forEach(([pid, arr]) => {
+    const cards = Array.isArray(arr) ? arr : [];
+    cards.forEach((v, idx) => {
+      if (normalizeCardValue(v) === 'sp3') return;
+      entries.push({ playerId: String(pid), playedIndex: Number(idx), value: String(v ?? '') });
+    });
+  });
+  return entries;
+}
+
+async function resolveSp3(playerId){
+  if (!state.roomCode) return;
+  const seq = state.turn.turnSeq;
+  const turnRef = ref(db, `rooms/${state.roomCode}/turn`);
+
+  const pickable = getSp3PickablePlayedEntries();
+  if (!pickable.length){
+    await advanceTurnToNextPlayer();
+    return;
+  }
+
+  await update(turnRef, { paused:true });
+
+  const effectId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await set(ref(db, `rooms/${state.roomCode}/effectSp3`), {
+    id: effectId,
+    playerId,
+    seq: Number(seq || 0),
+    phase: 'selectDiscard',
+    at: Date.now(),
+  });
+}
+
+async function handleSp3PickDiscard(fromPlayerId, fromPlayedIndex, sourceEl = null){
+  if (!state.roomCode) return;
+  const ef = state.effectSp3;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'selectDiscard') return;
+
+  const pid = String(fromPlayerId || '');
+  const idx = Number(fromPlayedIndex);
+  if (!pid || !Number.isFinite(idx)) return;
+
+  let pickedValue = null;
+  const playedRef = ref(db, `rooms/${state.roomCode}/played/${pid}`);
+  const rem = await runTransaction(playedRef, (arr) => {
+    const src = Array.isArray(arr) ? [...arr] : [];
+    if (!src.length || idx < 0 || idx >= src.length) return src;
+    if (normalizeCardValue(src[idx]) === 'sp3') return src;
+    pickedValue = src.splice(idx, 1)[0];
+    return src;
+  }, { applyLocally:false });
+
+  if (!rem.committed || pickedValue == null){
+    if (sourceEl) sourceEl.classList.remove('drag-source-hidden');
+    return;
+  }
+
+  await addCardToHandAtomic(state.userId, String(pickedValue));
+
+  await set(ref(db, `rooms/${state.roomCode}/effectSp3`), {
+    id: ef.id,
+    playerId: ef.playerId,
+    seq: Number(ef.seq || 0),
+    phase: 'returnToDeck',
+    at: Date.now(),
+  });
+}
+
+async function handleSp3ReturnToDeck(cardIndex, cardEl){
+  if (!state.roomCode) return;
+
+  const ef = state.effectSp3;
+  if (!ef || ef.playerId !== state.userId || ef.phase !== 'returnToDeck'){
+    renderMyHand();
+    return;
+  }
+
+
+  if (cardEl){
+    cardEl.classList.add('selected');
+    await sleep(60);
+    cardEl.classList.add('drag-source-hidden');
+  }
+
+  const cardsRef = ref(db, `rooms/${state.roomCode}/hands/${state.userId}/cards`);
+  let pickedValue = null;
+  const rem = await runTransaction(cardsRef, (cards) => {
+    const arr = Array.isArray(cards) ? [...cards] : [];
+    if (cardIndex < 0 || cardIndex >= arr.length) return arr;
+    pickedValue = arr.splice(cardIndex, 1)[0];
+    return arr;
+  }, { applyLocally:false });
+
+  if (!rem.committed || pickedValue == null){
+    renderMyHand();
+    return;
+  }
+
+
+  await emitReturnTopEvent(state.userId);
+  await unshiftCardToDeckAtomic(String(pickedValue));
+
+  await set(ref(db, `rooms/${state.roomCode}/effectSp3`), null);
+  ui.effectSp3Picking = false;
+  ui.effectSp3Returning = false;
+  updateTurnUI();
+  renderMyHand();
+
+  await update(ref(db, `rooms/${state.roomCode}/turn`), { paused:false });
+  await advanceTurnToNextPlayer();
+}
+
 async function resolveSp1(playerId){
   if (!state.roomCode) return;
   const seq = state.turn.turnSeq;
@@ -9304,6 +9562,7 @@ btnJoin.addEventListener('click', async () => {
   subscribeEffect3();
   subscribeEffect4();
   subscribeEffectKt2();
+  subscribeEffectSp3();
   subscribeEffect6();
   subscribeEffectKt6();
   subscribeEffect7();
@@ -9888,6 +10147,7 @@ function renderPlayerCircle(players){
     ? (Array.isArray(state.effect8?.targetPlayerIds) ? state.effect8.targetPlayerIds.map(String) : [])
     : [];
   const kt2MineSelecting = !!(state.effectKt2 && state.effectKt2.playerId === state.userId && state.effectKt2.phase === 'select');
+  const sp3MineSelecting = !!(state.effectSp3 && state.effectSp3.playerId === state.userId && state.effectSp3.phase === 'selectDiscard');
   const kt6MineSelectingDiscard = !!(state.effectKt6 && state.effectKt6.playerId === state.userId && state.effectKt6.phase === 'selectDiscard');
   const pickMode = (e3MineSelecting || e4MineSelecting || e8MineSelecting) && !state.gameOver;
 
@@ -10147,6 +10407,18 @@ function renderPlayerCircle(players){
           c.addEventListener('pointercancel', onKt6PlayedPointerCancel);
         }
 
+        if (sp3MineSelecting){
+          const nKeySp3 = normalizeCardValue(v);
+          if (nKeySp3 !== 'sp3'){
+            c.classList.add('sp3-pickable');
+            c.draggable = false;
+            c.addEventListener('pointerdown', (ev) => onSp3PlayedPointerDown(ev, c));
+            c.addEventListener('pointermove', onSp3PlayedPointerMove);
+            c.addEventListener('pointerup', onSp3PlayedPointerUp);
+            c.addEventListener('pointercancel', onSp3PlayedPointerCancel);
+          }
+        }
+
         row.appendChild(c);
       });
 
@@ -10223,6 +10495,7 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effect7`), null),
     set(ref(db, `rooms/${state.roomCode}/effect8`), null),
     set(ref(db, `rooms/${state.roomCode}/effectKt2`), null),
+    set(ref(db, `rooms/${state.roomCode}/effectSp3`), null),
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
@@ -10291,6 +10564,7 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effect7`)),
     remove(ref(db, `${base}/effect8`)),
     remove(ref(db, `${base}/effectKt2`)),
+    remove(ref(db, `${base}/effectSp3`)),
 
     remove(ref(db, `${base}/eliminated`)),
     remove(ref(db, `${base}/kt1Revived`)),
