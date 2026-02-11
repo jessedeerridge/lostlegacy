@@ -2053,7 +2053,9 @@ const state = {
   effectSp3: null,
 
   eliminated: {},     // ★脱落者
+  eliminationReasons: {},
   kt1Revived: {},     // ★kt1復帰済み
+  sp2PlayedHistory: {},
   gameOver: null,     // ★ゲーム終了
 
   turn: { currentPlayerId:null, turnSeq:0, drawn:false, paused:false },
@@ -2061,6 +2063,8 @@ const state = {
   isMyTurn: false,
   isPlayable: false,
 };
+
+let sp2ExpiryCheckTimer = null;
 
 const ui = {
   effect2Selecting: false,
@@ -2773,10 +2777,22 @@ function getCardRank(value){
   return Number.isFinite(n) ? n : 99;
 }
 
+function isSp2ExpiredHandActive(playerId){
+  if (!playerId) return false;
+  if (!state.eliminated?.[playerId]) return false;
+  if (state.eliminationReasons?.[playerId] !== 'sp2Expired') return false;
+  const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
+  return cards.length > 0;
+}
+
+function canBeHandTargeted(playerId){
+  return !state.eliminated?.[playerId] || isSp2ExpiredHandActive(playerId);
+}
+
 function getExplorationGroups(){
   const groups = new Map();
   latestPlayers.forEach((p) => {
-    if (state.eliminated?.[p.id]) return;
+    if (!canBeHandTargeted(p.id)) return;
     const hand = state.hands?.[p.id];
     const cards = Array.isArray(hand?.cards) ? hand.cards : [];
     if (!cards.length) return;
@@ -3492,6 +3508,7 @@ function subscribeHostState(){
     syncHelpConfigFromRoom();
     updateHostUI();
     syncSeatUI();
+    void scheduleSp2ExpiryEliminationChecks();
   });
 }
 
@@ -3508,6 +3525,7 @@ function subscribePlayed(){
   onValue(pRef, snap => {
     state.played = snap.val() || {};
     renderHands();
+    void scheduleSp2ExpiryEliminationChecks();
   });
 }
 
@@ -3534,7 +3552,25 @@ function subscribeEliminated(){
   onValue(eRef, snap => {
     state.eliminated = snap.val() || {};
     updateTurnUI();
+    renderHands();
     scheduleLastSurvivorCheck();
+  });
+}
+
+
+function subscribeEliminationReasons(){
+  const rRef = ref(db, `rooms/${state.roomCode}/eliminationReasons`);
+  onValue(rRef, snap => {
+    state.eliminationReasons = snap.val() || {};
+    renderHands();
+  });
+}
+
+function subscribeSp2PlayedHistory(){
+  const hRef = ref(db, `rooms/${state.roomCode}/sp2PlayedHistory`);
+  onValue(hRef, snap => {
+    state.sp2PlayedHistory = snap.val() || {};
+    void scheduleSp2ExpiryEliminationChecks();
   });
 }
 
@@ -7301,12 +7337,17 @@ async function removeCardFromHandByIndex(playerId, cardIndex){
 
 async function addCardToPlayed(playerId, cardValue){
   if (!state.roomCode) return;
+  const card = String(cardValue ?? '');
   const pRef = ref(db, `rooms/${state.roomCode}/played/${playerId}`);
   await runTransaction(pRef, (arr) => {
     const a = Array.isArray(arr) ? [...arr] : [];
-    a.push(String(cardValue ?? ''));
+    a.push(card);
     return a;
   }, { applyLocally:false });
+
+  if (normalizeCardValue(card) === 'sp2'){
+    await set(ref(db, `rooms/${state.roomCode}/sp2PlayedHistory/${playerId}`), true);
+  }
 
   await checkAndHandleKtXElimination(playerId, { seq: state.turn?.turnSeq });
 }
@@ -7496,6 +7537,116 @@ async function discardHandToPlayed(playerId){
   return removed;
 }
 
+
+async function hasSp2InAnyPlayed(){
+  const playedMap = state.played || {};
+  return Object.values(playedMap).some((arr) => Array.isArray(arr) && arr.some((v) => normalizeCardValue(v) === 'sp2'));
+}
+
+async function tryReviveWithSp2(playerId, seq = null){
+  if (!state.roomCode || !playerId) return false;
+
+  const hasSp2 = await hasSp2InAnyPlayed();
+  if (!hasSp2) return false;
+
+  const handSnap = await get(ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`));
+  const cards = Array.isArray(handSnap.val()) ? handSnap.val() : [];
+  if (cards.length > 0) return false;
+
+  const lockRef = ref(db, `rooms/${state.roomCode}/sp2ReviveLocks/${playerId}`);
+  let canRevive = false;
+  const lockRes = await runTransaction(lockRef, (locked) => {
+    if (locked) return locked;
+    canRevive = true;
+    return { at: Date.now() };
+  }, { applyLocally:false });
+  if (!lockRes.committed || !canRevive) return false;
+
+  await sleep(1000);
+
+  const stillHasSp2 = await hasSp2InAnyPlayed();
+  if (!stillHasSp2){
+    await set(lockRef, null);
+    return false;
+  }
+
+  const cardsAfterWaitSnap = await get(ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`));
+  const cardsAfterWait = Array.isArray(cardsAfterWaitSnap.val()) ? cardsAfterWaitSnap.val() : [];
+  if (cardsAfterWait.length > 0){
+    await set(lockRef, null);
+    return false;
+  }
+
+  const drawn = await drawOneFromDeckAtomic();
+  if (!drawn){
+    await set(lockRef, null);
+    return false;
+  }
+
+  await emitDrawEvent(playerId, seq, 'sp2Revive');
+  await sleep(DRAW_COMMIT_DELAY_MS);
+  await addCardToHandAtomic(playerId, drawn);
+
+  await Promise.all([
+    set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null),
+    set(ref(db, `rooms/${state.roomCode}/eliminationReasons/${playerId}`), null),
+    set(lockRef, null),
+  ]);
+
+  if (state.eliminated?.[playerId]){
+    const nextEliminated = { ...(state.eliminated || {}) };
+    delete nextEliminated[playerId];
+    state.eliminated = nextEliminated;
+  }
+  if (state.eliminationReasons?.[playerId]){
+    const nextReasons = { ...(state.eliminationReasons || {}) };
+    delete nextReasons[playerId];
+    state.eliminationReasons = nextReasons;
+  }
+
+  return true;
+}
+
+async function scheduleSp2ExpiryEliminationChecks(){
+  if (!state.isHost || !state.roomCode) return;
+  if (sp2ExpiryCheckTimer) clearTimeout(sp2ExpiryCheckTimer);
+  sp2ExpiryCheckTimer = setTimeout(async () => {
+    sp2ExpiryCheckTimer = null;
+    const hasSp2 = await hasSp2InAnyPlayed();
+    if (hasSp2) return;
+
+    const history = state.sp2PlayedHistory || {};
+    const targets = Object.entries(history)
+      .filter(([_, used]) => !!used)
+      .map(([pid]) => String(pid))
+      .filter((pid) => !state.eliminated?.[pid]);
+
+    for (const pid of targets){
+      const lockRef = ref(db, `rooms/${state.roomCode}/sp2ExpiryLocks/${pid}`);
+      let canRun = false;
+      const lockRes = await runTransaction(lockRef, (locked) => {
+        if (locked) return locked;
+        canRun = true;
+        return { at: Date.now() };
+      }, { applyLocally:false });
+      if (!lockRes.committed || !canRun) continue;
+
+      await sleep(1000);
+      const stillNoSp2 = !(await hasSp2InAnyPlayed());
+      if (!stillNoSp2){
+        await set(lockRef, null);
+        continue;
+      }
+
+      await Promise.all([
+        set(ref(db, `rooms/${state.roomCode}/eliminated/${pid}`), true),
+        set(ref(db, `rooms/${state.roomCode}/eliminationReasons/${pid}`), 'sp2Expired'),
+        set(lockRef, null),
+      ]);
+    }
+  }, 120);
+}
+
 async function tryReviveWithKt1(playerId, seq = null){
   if (!state.roomCode || !playerId) return false;
 
@@ -7522,11 +7673,19 @@ async function tryReviveWithKt1(playerId, seq = null){
   await sleep(DRAW_COMMIT_DELAY_MS);
   await addCardToHandAtomic(playerId, drawn);
 
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
+  await Promise.all([
+    set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null),
+    set(ref(db, `rooms/${state.roomCode}/eliminationReasons/${playerId}`), null),
+  ]);
   if (state.eliminated?.[playerId]){
     const nextEliminated = { ...(state.eliminated || {}) };
     delete nextEliminated[playerId];
     state.eliminated = nextEliminated;
+  }
+  if (state.eliminationReasons?.[playerId]){
+    const nextReasons = { ...(state.eliminationReasons || {}) };
+    delete nextReasons[playerId];
+    state.eliminationReasons = nextReasons;
   }
 
   return true;
@@ -7534,12 +7693,17 @@ async function tryReviveWithKt1(playerId, seq = null){
 
 async function eliminatePlayerWithKt1Check(playerId, seq = null){
   if (!state.roomCode || !playerId) return false;
-  const revived = await tryReviveWithKt1(playerId, seq);
-  if (revived) return false;
+  const revivedKt1 = await tryReviveWithKt1(playerId, seq);
+  if (revivedKt1) return false;
 
   // タグ表示を先に切り替えて体感遅延を減らす
   state.eliminated = { ...(state.eliminated || {}), [playerId]: true };
-  await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
+  await Promise.all([
+    set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true),
+    set(ref(db, `rooms/${state.roomCode}/eliminationReasons/${playerId}`), 'normal'),
+  ]);
+
+  void tryReviveWithSp2(playerId, seq);
   return true;
 }
 
@@ -9403,7 +9567,7 @@ async function resolveSp1(playerId){
   const candidateIds = players
     .map((p) => p.id)
     .filter((pid) => pid !== playerId)
-    .filter((pid) => !state.eliminated?.[pid])
+    .filter((pid) => canBeHandTargeted(pid))
     .filter((pid) => {
       const played = Array.isArray(state.played?.[pid]) ? state.played[pid] : [];
       return played.some((v) => {
@@ -9555,6 +9719,8 @@ btnJoin.addEventListener('click', async () => {
   subscribeRuins();
 
   subscribeEliminated();
+  subscribeEliminationReasons();
+  subscribeSp2PlayedHistory();
   subscribeKt1Revived();
   subscribeGameOver();
 
@@ -10159,6 +10325,8 @@ function renderPlayerCircle(players){
     const y = 50 + radius * Math.sin(angle);
 
     const isElim = !!state.eliminated?.[p.id];
+    const handTargetable = canBeHandTargeted(p.id);
+    const handShouldDim = isElim && !isSp2ExpiredHandActive(p.id);
 
     if (p.id === state.userId){
       const tag = document.createElement('div');
@@ -10193,10 +10361,10 @@ function renderPlayerCircle(players){
       }
 
       // ★③/④選択中（使用者のみ）→ 他プレイヤーの扇をクリック可
-      if (pickMode && !isElim){
+      if (pickMode && handTargetable){
         fan.classList.add('pick-mode');
       }
-      if (sp1MineSelectingKill && !isElim && sp1TargetPlayerIds.includes(String(p.id))){
+      if (sp1MineSelectingKill && handTargetable && sp1TargetPlayerIds.includes(String(p.id))){
         fan.classList.add('sp1-selectable');
         fan.addEventListener('click', async (ev) => {
           ev.stopPropagation();
@@ -10264,7 +10432,7 @@ function renderPlayerCircle(players){
         card.addEventListener('pointerdown', (ev) => startZoomTap(ev, card));
 
         // ★③/④：使用者が選択中なら pickable
-        if (pickMode && !isElim){
+        if (pickMode && handTargetable){
           card.classList.add('pickable');
 
           // ここでカードを選ぶ（クリックしたカード番号を「そのまま index」として扱う）
@@ -10290,7 +10458,7 @@ function renderPlayerCircle(players){
         }
 
         // 脱落者は見た目落とす
-        if (isElim){
+        if (handShouldDim){
           card.style.opacity = '.35';
           card.style.filter = 'grayscale(1)';
         }
@@ -10498,7 +10666,11 @@ async function dealAllCardsAndInitialDraw(){
     set(ref(db, `rooms/${state.roomCode}/effectSp3`), null),
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
+    set(ref(db, `rooms/${state.roomCode}/eliminationReasons`), {}),
     set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
+    set(ref(db, `rooms/${state.roomCode}/sp2PlayedHistory`), {}),
+    set(ref(db, `rooms/${state.roomCode}/sp2ReviveLocks`), {}),
+    set(ref(db, `rooms/${state.roomCode}/sp2ExpiryLocks`), {}),
     set(ref(db, `rooms/${state.roomCode}/gameOver`), null),
 
     set(ref(db, `rooms/${state.roomCode}/deck`), deckRaw.map(toDisplayValue)),
@@ -10567,7 +10739,11 @@ btnResetRoom.addEventListener('click', async () => {
     remove(ref(db, `${base}/effectSp3`)),
 
     remove(ref(db, `${base}/eliminated`)),
+    remove(ref(db, `${base}/eliminationReasons`)),
     remove(ref(db, `${base}/kt1Revived`)),
+    remove(ref(db, `${base}/sp2PlayedHistory`)),
+    remove(ref(db, `${base}/sp2ReviveLocks`)),
+    remove(ref(db, `${base}/sp2ExpiryLocks`)),
     remove(ref(db, `${base}/gameOver`)),
 
     remove(ref(db, `${base}/turn`)),
