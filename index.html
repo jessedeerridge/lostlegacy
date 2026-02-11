@@ -2065,6 +2065,7 @@ const state = {
 };
 
 let sp2ExpiryCheckTimer = null;
+let sp2StateResetInFlight = false;
 
 const ui = {
   effect2Selecting: false,
@@ -7609,9 +7610,11 @@ async function tryReviveWithSp2(playerId, seq = null){
 
 async function scheduleSp2ExpiryEliminationChecks(){
   if (!state.isHost || !state.roomCode) return;
+  if (sp2StateResetInFlight) return;
   if (sp2ExpiryCheckTimer) clearTimeout(sp2ExpiryCheckTimer);
   sp2ExpiryCheckTimer = setTimeout(async () => {
     sp2ExpiryCheckTimer = null;
+    if (sp2StateResetInFlight) return;
     const hasSp2 = await hasSp2InAnyPlayed();
     if (hasSp2) return;
 
@@ -10618,6 +10621,13 @@ function toDisplayValue(v){ return String(v); }
 async function dealAllCardsAndInitialDraw(){
   if (!state.roomCode) return;
 
+  sp2StateResetInFlight = true;
+  if (sp2ExpiryCheckTimer){
+    clearTimeout(sp2ExpiryCheckTimer);
+    sp2ExpiryCheckTimer = null;
+  }
+  state.sp2PlayedHistory = {};
+
   resetExplorationState({ render:false });
 
   const tablesSnap = await get(ref(db, `rooms/${state.roomCode}/tables`));
@@ -10706,6 +10716,9 @@ async function dealAllCardsAndInitialDraw(){
     await sleep(DRAW_COMMIT_DELAY_MS);
     await addCardToHandAtomic(firstPlayerId, initialDrawDisp);
   }
+
+  sp2StateResetInFlight = false;
+  void scheduleSp2ExpiryEliminationChecks();
 }
 
 hostSettingsBtn.addEventListener('click', () => { if (!state.isHost) return; startPop.classList.toggle('hidden'); });
@@ -10713,7 +10726,11 @@ btnStartPopClose.addEventListener('click', () => { startPop.classList.add('hidde
 
 btnGameStart.addEventListener('click', async () => {
   if (!state.isHost) return;
-  await dealAllCardsAndInitialDraw();
+  try {
+    await dealAllCardsAndInitialDraw();
+  } finally {
+    sp2StateResetInFlight = false;
+  }
   startPop.classList.add('hidden');
 });
 
