@@ -2054,6 +2054,8 @@ const state = {
 
   eliminated: {},     // ★脱落者
   kt1Revived: {},     // ★kt1復帰済み
+  sp2Owners: {},      // ★sp2を一度でも捨てたプレイヤー
+  sp2LostEliminated: {}, // ★sp2消失で脱落表示中
   gameOver: null,     // ★ゲーム終了
 
   turn: { currentPlayerId:null, turnSeq:0, drawn:false, paused:false },
@@ -2763,6 +2765,64 @@ let tempArrowConfig = null;
 let lastSurvivorTimer = null;
 let pendingXRevealTarget = null;
 let pendingOneRevealTarget = null;
+const sp2LostEliminationTimers = new Map();
+
+function hasSp2InAnyPlayed(){
+  const playedMap = state.played || {};
+  return Object.values(playedMap).some((arr) => {
+    if (!Array.isArray(arr)) return false;
+    return arr.some((v) => normalizeCardValue(v) === 'sp2');
+  });
+}
+
+function hasHandCards(playerId){
+  const cards = state.hands?.[playerId]?.cards;
+  return Array.isArray(cards) && cards.length > 0;
+}
+
+function canSelectHandOfPlayer(playerId){
+  if (!state.eliminated?.[playerId]) return true;
+  return !!state.sp2LostEliminated?.[playerId] && hasHandCards(playerId);
+}
+
+function clearSp2LostEliminationTimer(playerId){
+  const timer = sp2LostEliminationTimers.get(playerId);
+  if (timer){
+    clearTimeout(timer);
+    sp2LostEliminationTimers.delete(playerId);
+  }
+}
+
+function scheduleSp2LostEliminationCheck(){
+  if (!state.isHost || !state.roomCode) return;
+  const sp2Exists = hasSp2InAnyPlayed();
+  const ownerIds = Object.entries(state.sp2Owners || {})
+    .filter(([, v]) => !!v)
+    .map(([pid]) => String(pid));
+
+  if (sp2Exists){
+    ownerIds.forEach((pid) => clearSp2LostEliminationTimer(pid));
+    return;
+  }
+
+  ownerIds.forEach((pid) => {
+    if (state.eliminated?.[pid]) return;
+    if (sp2LostEliminationTimers.has(pid)) return;
+
+    const timer = setTimeout(async () => {
+      sp2LostEliminationTimers.delete(pid);
+      if (!state.isHost || !state.roomCode) return;
+      if (hasSp2InAnyPlayed()) return;
+
+      await Promise.all([
+        set(ref(db, `rooms/${state.roomCode}/eliminated/${pid}`), true),
+        set(ref(db, `rooms/${state.roomCode}/sp2LostEliminated/${pid}`), true),
+      ]);
+    }, 1000);
+
+    sp2LostEliminationTimers.set(pid, timer);
+  });
+}
 
 function getCardRank(value){
   if (value === null || value === undefined) return null;
@@ -2776,7 +2836,7 @@ function getCardRank(value){
 function getExplorationGroups(){
   const groups = new Map();
   latestPlayers.forEach((p) => {
-    if (state.eliminated?.[p.id]) return;
+    if (!canSelectHandOfPlayer(p.id)) return;
     const hand = state.hands?.[p.id];
     const cards = Array.isArray(hand?.cards) ? hand.cards : [];
     if (!cards.length) return;
@@ -3507,6 +3567,7 @@ function subscribePlayed(){
   const pRef = ref(db, `rooms/${state.roomCode}/played`);
   onValue(pRef, snap => {
     state.played = snap.val() || {};
+    scheduleSp2LostEliminationCheck();
     renderHands();
   });
 }
@@ -3542,6 +3603,23 @@ function subscribeKt1Revived(){
   const kRef = ref(db, `rooms/${state.roomCode}/kt1Revived`);
   onValue(kRef, snap => {
     state.kt1Revived = snap.val() || {};
+    renderHands();
+  });
+}
+
+function subscribeSp2Owners(){
+  const sRef = ref(db, `rooms/${state.roomCode}/sp2Owners`);
+  onValue(sRef, snap => {
+    state.sp2Owners = snap.val() || {};
+    scheduleSp2LostEliminationCheck();
+    renderHands();
+  });
+}
+
+function subscribeSp2LostEliminated(){
+  const sRef = ref(db, `rooms/${state.roomCode}/sp2LostEliminated`);
+  onValue(sRef, snap => {
+    state.sp2LostEliminated = snap.val() || {};
     renderHands();
   });
 }
@@ -7301,12 +7379,20 @@ async function removeCardFromHandByIndex(playerId, cardIndex){
 
 async function addCardToPlayed(playerId, cardValue){
   if (!state.roomCode) return;
+  const normalized = normalizeCardValue(cardValue);
   const pRef = ref(db, `rooms/${state.roomCode}/played/${playerId}`);
   await runTransaction(pRef, (arr) => {
     const a = Array.isArray(arr) ? [...arr] : [];
     a.push(String(cardValue ?? ''));
     return a;
   }, { applyLocally:false });
+
+  if (normalized === 'sp2'){
+    await Promise.all([
+      set(ref(db, `rooms/${state.roomCode}/sp2Owners/${playerId}`), true),
+      set(ref(db, `rooms/${state.roomCode}/sp2LostEliminated/${playerId}`), null),
+    ]);
+  }
 
   await checkAndHandleKtXElimination(playerId, { seq: state.turn?.turnSeq });
 }
@@ -7532,6 +7618,55 @@ async function tryReviveWithKt1(playerId, seq = null){
   return true;
 }
 
+async function tryReviveWithSp2(playerId, seq = null){
+  if (!state.roomCode || !playerId) return false;
+  if (!hasSp2InAnyPlayed()) return false;
+
+  const handSnap = await get(ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`));
+  const cards = Array.isArray(handSnap.val()) ? handSnap.val() : [];
+  if (cards.length > 0) return false;
+
+  const lockRef = ref(db, `rooms/${state.roomCode}/sp2ReviveLock/${playerId}`);
+  let canProceed = false;
+  const lockRes = await runTransaction(lockRef, (v) => {
+    if (v) return v;
+    canProceed = true;
+    return Date.now();
+  }, { applyLocally:false });
+  if (!lockRes.committed || !canProceed) return false;
+
+  try {
+    await sleep(1000);
+    if (!hasSp2InAnyPlayed()) return false;
+
+    const checkHandSnap = await get(ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`));
+    const checkCards = Array.isArray(checkHandSnap.val()) ? checkHandSnap.val() : [];
+    if (checkCards.length > 0) return false;
+
+    const drawn = await drawOneFromDeckAtomic();
+    if (!drawn) return false;
+
+    await emitDrawEvent(playerId, seq, 'sp2Revive');
+    await sleep(DRAW_COMMIT_DELAY_MS);
+    await addCardToHandAtomic(playerId, drawn);
+
+    await Promise.all([
+      set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null),
+      set(ref(db, `rooms/${state.roomCode}/sp2LostEliminated/${playerId}`), null),
+    ]);
+
+    if (state.eliminated?.[playerId]){
+      const nextEliminated = { ...(state.eliminated || {}) };
+      delete nextEliminated[playerId];
+      state.eliminated = nextEliminated;
+    }
+
+    return true;
+  } finally {
+    await set(lockRef, null);
+  }
+}
+
 async function eliminatePlayerWithKt1Check(playerId, seq = null){
   if (!state.roomCode || !playerId) return false;
   const revived = await tryReviveWithKt1(playerId, seq);
@@ -7540,6 +7675,10 @@ async function eliminatePlayerWithKt1Check(playerId, seq = null){
   // タグ表示を先に切り替えて体感遅延を減らす
   state.eliminated = { ...(state.eliminated || {}), [playerId]: true };
   await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
+
+  const sp2Revived = await tryReviveWithSp2(playerId, seq);
+  if (sp2Revived) return false;
+
   return true;
 }
 
@@ -9403,7 +9542,7 @@ async function resolveSp1(playerId){
   const candidateIds = players
     .map((p) => p.id)
     .filter((pid) => pid !== playerId)
-    .filter((pid) => !state.eliminated?.[pid])
+    .filter((pid) => canSelectHandOfPlayer(pid))
     .filter((pid) => {
       const played = Array.isArray(state.played?.[pid]) ? state.played[pid] : [];
       return played.some((v) => {
@@ -9556,6 +9695,8 @@ btnJoin.addEventListener('click', async () => {
 
   subscribeEliminated();
   subscribeKt1Revived();
+  subscribeSp2Owners();
+  subscribeSp2LostEliminated();
   subscribeGameOver();
 
   subscribeEffect2();
@@ -10193,10 +10334,10 @@ function renderPlayerCircle(players){
       }
 
       // ★③/④選択中（使用者のみ）→ 他プレイヤーの扇をクリック可
-      if (pickMode && !isElim){
+      if (pickMode && canSelectHandOfPlayer(p.id)){
         fan.classList.add('pick-mode');
       }
-      if (sp1MineSelectingKill && !isElim && sp1TargetPlayerIds.includes(String(p.id))){
+      if (sp1MineSelectingKill && canSelectHandOfPlayer(p.id) && sp1TargetPlayerIds.includes(String(p.id))){
         fan.classList.add('sp1-selectable');
         fan.addEventListener('click', async (ev) => {
           ev.stopPropagation();
@@ -10264,7 +10405,7 @@ function renderPlayerCircle(players){
         card.addEventListener('pointerdown', (ev) => startZoomTap(ev, card));
 
         // ★③/④：使用者が選択中なら pickable
-        if (pickMode && !isElim){
+        if (pickMode && canSelectHandOfPlayer(p.id)){
           card.classList.add('pickable');
 
           // ここでカードを選ぶ（クリックしたカード番号を「そのまま index」として扱う）
@@ -10290,7 +10431,7 @@ function renderPlayerCircle(players){
         }
 
         // 脱落者は見た目落とす
-        if (isElim){
+        if (isElim && !canSelectHandOfPlayer(p.id)){
           card.style.opacity = '.35';
           card.style.filter = 'grayscale(1)';
         }
@@ -10499,6 +10640,9 @@ async function dealAllCardsAndInitialDraw(){
 
     set(ref(db, `rooms/${state.roomCode}/eliminated`), {}),
     set(ref(db, `rooms/${state.roomCode}/kt1Revived`), {}),
+    set(ref(db, `rooms/${state.roomCode}/sp2Owners`), {}),
+    set(ref(db, `rooms/${state.roomCode}/sp2LostEliminated`), {}),
+    set(ref(db, `rooms/${state.roomCode}/sp2ReviveLock`), {}),
     set(ref(db, `rooms/${state.roomCode}/gameOver`), null),
 
     set(ref(db, `rooms/${state.roomCode}/deck`), deckRaw.map(toDisplayValue)),
@@ -10568,6 +10712,9 @@ btnResetRoom.addEventListener('click', async () => {
 
     remove(ref(db, `${base}/eliminated`)),
     remove(ref(db, `${base}/kt1Revived`)),
+    remove(ref(db, `${base}/sp2Owners`)),
+    remove(ref(db, `${base}/sp2LostEliminated`)),
+    remove(ref(db, `${base}/sp2ReviveLock`)),
     remove(ref(db, `${base}/gameOver`)),
 
     remove(ref(db, `${base}/turn`)),
