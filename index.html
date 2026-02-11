@@ -2113,6 +2113,12 @@ const ui = {
   confirmNoAction: null,
 };
 
+const SP2_REVIVE_DELAY_MS = 1200;
+const SP2_REMOVED_ELIM_DELAY_MS = 1000;
+const sp2ReviveTimers = new Map();
+const sp2RemovedElimTimers = new Map();
+const sp2HadInPlayedByPlayer = {};
+
 const mainEl = document.getElementById('main');
 const joinBox = document.getElementById('joinBox');
 const inputName = document.getElementById('userName');
@@ -3487,8 +3493,20 @@ function subscribeRoom(){
 function subscribeHostState(){
   const hostRef = ref(db, `rooms/${state.roomCode}/hostId`);
   onValue(hostRef, snap => {
+    const wasHost = state.isHost;
     const hostId = snap.val();
     state.isHost = (hostId === state.userId);
+
+    if (wasHost && !state.isHost){
+      for (const playerId of Object.keys(sp2HadInPlayedByPlayer)){
+        clearSp2TimersForPlayer(playerId);
+      }
+    }
+
+    if (state.isHost){
+      syncSp2StateTransitions();
+    }
+
     syncHelpConfigFromRoom();
     updateHostUI();
     syncSeatUI();
@@ -3499,6 +3517,7 @@ function subscribeHands(){
   const handsRef = ref(db, `rooms/${state.roomCode}/hands`);
   onValue(handsRef, snap => {
     state.hands = snap.val() || {};
+    syncSp2StateTransitions();
     renderHands();
   });
 }
@@ -3507,6 +3526,7 @@ function subscribePlayed(){
   const pRef = ref(db, `rooms/${state.roomCode}/played`);
   onValue(pRef, snap => {
     state.played = snap.val() || {};
+    syncSp2StateTransitions();
     renderHands();
   });
 }
@@ -3533,6 +3553,7 @@ function subscribeEliminated(){
   const eRef = ref(db, `rooms/${state.roomCode}/eliminated`);
   onValue(eRef, snap => {
     state.eliminated = snap.val() || {};
+    syncSp2StateTransitions();
     updateTurnUI();
     scheduleLastSurvivorCheck();
   });
@@ -7496,6 +7517,109 @@ async function discardHandToPlayed(playerId){
   return removed;
 }
 
+function clearSp2TimersForPlayer(playerId){
+  const reviveTimer = sp2ReviveTimers.get(playerId);
+  if (reviveTimer){
+    clearTimeout(reviveTimer);
+    sp2ReviveTimers.delete(playerId);
+  }
+
+  const removedElimTimer = sp2RemovedElimTimers.get(playerId);
+  if (removedElimTimer){
+    clearTimeout(removedElimTimer);
+    sp2RemovedElimTimers.delete(playerId);
+  }
+}
+
+async function tryReviveWithSp2(playerId, seq = null){
+  if (!state.roomCode || !playerId) return false;
+
+  const played = Array.isArray(state.played?.[playerId]) ? state.played[playerId] : [];
+  if (!played.includes('sp2')) return false;
+
+  const handCards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
+  if (handCards.length > 0) return false;
+
+  const isEliminated = !!state.eliminated?.[playerId];
+  if (!isEliminated) return false;
+
+  if (sp2ReviveTimers.has(playerId)) return false;
+
+  const timerId = setTimeout(async () => {
+    sp2ReviveTimers.delete(playerId);
+
+    const [playedSnap, handSnap, elimSnap] = await Promise.all([
+      get(ref(db, `rooms/${state.roomCode}/played/${playerId}`)),
+      get(ref(db, `rooms/${state.roomCode}/hands/${playerId}/cards`)),
+      get(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`)),
+    ]);
+
+    const latestPlayed = Array.isArray(playedSnap.val()) ? playedSnap.val() : [];
+    const latestHand = Array.isArray(handSnap.val()) ? handSnap.val() : [];
+    const latestEliminated = !!elimSnap.val();
+
+    if (!latestPlayed.includes('sp2') || latestHand.length > 0 || !latestEliminated) return;
+
+    const drawn = await drawOneFromDeckAtomic();
+    if (!drawn) return;
+
+    await emitDrawEvent(playerId, seq, 'sp2Revive');
+    await sleep(DRAW_COMMIT_DELAY_MS);
+    await addCardToHandAtomic(playerId, drawn);
+    await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), null);
+  }, SP2_REVIVE_DELAY_MS);
+
+  sp2ReviveTimers.set(playerId, timerId);
+  return true;
+}
+
+function scheduleSp2RemovedElimination(playerId){
+  if (!state.roomCode || !playerId) return;
+  if (sp2RemovedElimTimers.has(playerId)) return;
+
+  const timerId = setTimeout(async () => {
+    sp2RemovedElimTimers.delete(playerId);
+
+    const playedSnap = await get(ref(db, `rooms/${state.roomCode}/played/${playerId}`));
+    const played = Array.isArray(playedSnap.val()) ? playedSnap.val() : [];
+    if (played.includes('sp2')) return;
+
+    await set(ref(db, `rooms/${state.roomCode}/eliminated/${playerId}`), true);
+  }, SP2_REMOVED_ELIM_DELAY_MS);
+
+  sp2RemovedElimTimers.set(playerId, timerId);
+}
+
+function syncSp2StateTransitions(){
+  if (!state.isHost || !state.roomCode || state.gameOver) return;
+
+  const playerIds = (latestPlayers || []).map((p) => p.id).filter(Boolean);
+  playerIds.forEach((playerId) => {
+    const played = Array.isArray(state.played?.[playerId]) ? state.played[playerId] : [];
+    const hasSp2 = played.includes('sp2');
+    const hadSp2 = !!sp2HadInPlayedByPlayer[playerId];
+
+    if (!hasSp2){
+      if (hadSp2) scheduleSp2RemovedElimination(playerId);
+      const reviveTimer = sp2ReviveTimers.get(playerId);
+      if (reviveTimer){
+        clearTimeout(reviveTimer);
+        sp2ReviveTimers.delete(playerId);
+      }
+    } else {
+      const removeTimer = sp2RemovedElimTimers.get(playerId);
+      if (removeTimer){
+        clearTimeout(removeTimer);
+        sp2RemovedElimTimers.delete(playerId);
+      }
+
+      void tryReviveWithSp2(playerId, state.turn?.turnSeq);
+    }
+
+    sp2HadInPlayedByPlayer[playerId] = hasSp2;
+  });
+}
+
 async function tryReviveWithKt1(playerId, seq = null){
   if (!state.roomCode || !playerId) return false;
 
@@ -9795,6 +9919,13 @@ function subscribePlayers(){
 
     latestPlayers = players;
 
+    const currentIds = new Set(players.map((p) => p.id));
+    for (const playerId of Object.keys(sp2HadInPlayedByPlayer)){
+      if (currentIds.has(playerId)) continue;
+      clearSp2TimersForPlayer(playerId);
+      delete sp2HadInPlayedByPlayer[playerId];
+    }
+
     const mySeat = players.find(p => p.id === state.userId);
     if (mySeat && state.seatedTable === null) { state.seatedTable = mySeat.seatIndex; seatPop.classList.add('hidden'); }
 
@@ -9807,6 +9938,7 @@ function subscribePlayers(){
     }
 
     await syncSeatUI();
+    syncSp2StateTransitions();
     renderPlayerCircle(players);
     scheduleLastSurvivorCheck();
   });
