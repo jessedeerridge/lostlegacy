@@ -810,7 +810,7 @@
     filter:grayscale(1);
   }
 
-  /* 遺跡エリア（2x3 + 追加1枠）：画面中心(=playerCircle中心)に固定。center-areaを動かしてもここは動かさない */
+  /* 遺跡エリア（2x3 + 追加2枠）：画面中心(=playerCircle中心)に固定。center-areaを動かしてもここは動かさない */
   .ruins-area{
     position:absolute;
     inset:0;
@@ -935,6 +935,7 @@
   .ruins-slot[data-i="4"], .ruins-card[data-i="4"]{ left:50%;                           top:calc(50% + var(--ru-half-y) + var(--ru-shift-y)); }
   .ruins-slot[data-i="5"], .ruins-card[data-i="5"]{ left:calc(50% + var(--ru-gap-x)); top:calc(50% + var(--ru-half-y) + var(--ru-shift-y)); }
   .ruins-slot[data-i="6"], .ruins-card[data-i="6"]{ left:calc(50% - var(--ru-gap-x)); top:calc(50% - var(--ru-half-y) - var(--ru-gap-y) + var(--ru-shift-y)); }
+  .ruins-slot[data-i="7"], .ruins-card[data-i="7"]{ left:50%;                           top:calc(50% - var(--ru-half-y) - var(--ru-gap-y) + var(--ru-shift-y)); }
 
   /* ===== ③/④：矢印（点線）オーバーレイ ===== */
   .effect-arrow-overlay{
@@ -2010,7 +2011,7 @@ function createBackGhost(){
 const RUINS_SHIFT_Y = 14;
 const RUINS_GAP_X = 54;
 const RUINS_GAP_Y = 74;
-const RUINS_SLOT_COUNT = 7;
+const RUINS_SLOT_COUNT = 8;
 
 const EFFECT4_X_GLOBAL_MS = 1600;
 const EFFECT4_X_AFTER_CLOSE_DELAY_MS = 1500;
@@ -2224,10 +2225,33 @@ const DECK_SETS = [
   },
 ];
 const HELP_CARDS_PER_ROW = 4;
+const HELP_CONFIG_CACHE_KEY_PREFIX = 'llHelpConfig:';
 const deckSetState = Object.fromEntries(DECK_SETS.map((set) => [set.id, true]));
 const deckCardState = Object.fromEntries(
   DECK_SETS.flatMap((set) => Object.keys(set.cardPool).map((cardKey) => [cardKey, true]))
 );
+
+function getHelpConfigCacheKey(roomCode){
+  return `${HELP_CONFIG_CACHE_KEY_PREFIX}${roomCode || ''}`;
+}
+
+function loadCachedHelpConfig(){
+  if (!state.roomCode) return null;
+  const key = getHelpConfigCacheKey(state.roomCode);
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
+}
+
+function cacheHelpConfig(config){
+  if (!state.roomCode || !config) return;
+  localStorage.setItem(getHelpConfigCacheKey(state.roomCode), JSON.stringify(config));
+}
 
 function snapshotHelpConfig(){
   return {
@@ -2264,18 +2288,25 @@ function applyHelpConfig(rawConfig){
 
 async function saveHelpConfig(){
   if (!state.isHost || !state.roomCode) return;
-  await set(ref(db, `rooms/${state.roomCode}/helpConfig`), snapshotHelpConfig());
+  const config = snapshotHelpConfig();
+  cacheHelpConfig(config);
+  await set(ref(db, `rooms/${state.roomCode}/helpConfig`), config);
 }
 
 function syncHelpConfigFromRoom(){
   const remoteHelpConfig = state.room?.helpConfig;
   if (!remoteHelpConfig){
     if (state.isHost){
+      const cachedHelpConfig = loadCachedHelpConfig();
+      if (cachedHelpConfig && applyHelpConfig(cachedHelpConfig) && !helpBackdrop.classList.contains('hidden')){
+        renderHelpList();
+      }
       void saveHelpConfig();
     }
     return;
   }
   const applied = applyHelpConfig(remoteHelpConfig);
+  if (applied) cacheHelpConfig(snapshotHelpConfig());
   if (applied && !helpBackdrop.classList.contains('hidden')){
     renderHelpList();
   }
@@ -9524,7 +9555,7 @@ function subscribePlayers(){
 
 function radToDeg(r){ return r * 180 / Math.PI; }
 
-/* 遺跡描画（2x3） */
+/* 遺跡描画（2x3 + 上段2枠） */
 function renderRuinsArea(){
   const wrap = document.createElement('div');
   wrap.className = 'ruins-area';
