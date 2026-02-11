@@ -292,6 +292,16 @@
     animation: handPulse 680ms ease-in-out infinite;
   }
 
+  .sp3-pulse{ animation:sp3Pulse 820ms ease-in-out infinite; }
+  .sp3-drop-hint{
+    box-shadow:0 0 0 3px rgba(59,130,246,.22), 0 0 0 8px rgba(59,130,246,.14) !important;
+    border-color:#3b82f6 !important;
+  }
+  @keyframes sp3Pulse{
+    0%,100%{ transform:scale(1); }
+    50%{ transform:scale(1.12); }
+  }
+
   .dialog-backdrop{
     position:fixed;inset:0;background:rgba(0,0,0,.35);
     display:flex;align-items:center;justify-content:center;z-index:600;
@@ -659,7 +669,11 @@ const state = {
 
   deckParked: null,
   deckParkEl: null,
+
+  sp3Mode: null,
 };
+
+const SP3_NAME = 'sp3';
 
 const mainEl = document.getElementById('main');
 const fxLayer = document.getElementById('fxLayer');
@@ -1020,6 +1034,8 @@ function subscribeHandsResetEvent(){
     lastHandsResetEventId = ev.id;
 
     state.pendingOutgoing = null;
+    state.sp3Mode = null;
+    clearSp3Hints();
 
     for (const [,t] of state.inTransit.entries()){
       try{ t.el.remove(); }catch{}
@@ -1496,6 +1512,7 @@ function layoutMiniHand(tag, count){
     const angleDeg = (count > 1) ? base + (spread/(count-1))*idx2 : 0;
     cardEl.style.transform = `translate(-50%,0) rotate(${angleDeg}deg)`;
     cardEl.style.zIndex = String(10 + idx2);
+    cardEl.dataset.cardIndex = String(idx2);
   });
 }
 
@@ -1555,6 +1572,9 @@ function renderPlayerCircle(players){
 function renderHands(){
   renderMyHand();
   if (latestPlayers.length) renderPlayerCircle(latestPlayers);
+
+  if (state.sp3Mode?.phase === 'pickDiscard') startSp3Phase1();
+  else if (state.sp3Mode?.phase === 'sendDeck') startSp3Phase2();
 }
 
 /* =========================
@@ -2055,8 +2075,66 @@ let drag = null;
 function canDragNow(){
   if (!state.activeTurn?.id) return false;
   if (!isMyTurn()) return false;
+  if (state.sp3Mode) return true;
   if (state.turnDrawnTurnId !== state.activeTurn.id) return false;
   return true;
+}
+
+function clearSp3Hints(){
+  document.querySelectorAll('.sp3-pulse').forEach(el => el.classList.remove('sp3-pulse'));
+  myHandEl.classList.remove('sp3-drop-hint');
+  deckCircle.classList.remove('sp3-drop-hint');
+}
+
+function normalizeSp3(v){ return String(v || '').trim().toLowerCase(); }
+
+function collectSp3Candidates(){
+  const list = [];
+  for (const p of latestPlayers){
+    const cards = Array.isArray(state.hands?.[p.id]?.cards) ? state.hands[p.id].cards : [];
+    cards.forEach((card, i) => {
+      if (normalizeSp3(card) === SP3_NAME) return;
+      list.push({ playerId:p.id, value:card, index:i });
+    });
+  }
+  return list;
+}
+
+function startSp3Phase1(){
+  clearSp3Hints();
+  const candidates = collectSp3Candidates();
+  if (!candidates.length){
+    state.sp3Mode = null;
+    advanceTurnFromPlayer(state.userId);
+    return;
+  }
+
+  state.sp3Mode = { phase:'pickDiscard' };
+
+  document.querySelectorAll('.mini-hand .mini-card').forEach(el => {
+    const tag = el.closest('.player-tag');
+    const playerId = tag?.dataset.playerid;
+    if (!playerId) return;
+    const idx = Number(el.dataset.cardIndex ?? -1);
+    const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
+    const card = cards[idx];
+    if (normalizeSp3(card) === SP3_NAME) return;
+    el.classList.add('sp3-pulse');
+  });
+
+  Array.from(myHandEl.querySelectorAll('.my-card')).forEach((el, idx) => {
+    const card = state.hands?.[state.userId]?.cards?.[idx];
+    if (normalizeSp3(card) === SP3_NAME) return;
+    el.classList.add('sp3-pulse');
+  });
+  myHandEl.classList.add('sp3-drop-hint');
+}
+
+function startSp3Phase2(){
+  clearSp3Hints();
+  state.sp3Mode = { phase:'sendDeck' };
+  Array.from(myHandEl.querySelectorAll('.my-card')).forEach(el => el.classList.add('sp3-pulse'));
+  deckCircle.classList.add('sp3-drop-hint');
 }
 
 /* ✅ 次プレイヤーのドロップ判定 */
@@ -2161,9 +2239,10 @@ function animateDraggedCardToTarget(dragEl, fromLeft, fromTop, toCenterClient, o
   return { anim, toLeft, toTop, endScale, rot1 };
 }
 
-/* ✅ DB更新：次プレイヤーへ */
-async function moveCardToNextPlayer(fromId, toId, cardValue, fromIndex){
+/* ✅ DB更新：プレイヤー間移動 */
+async function moveCardToPlayer(fromId, toId, cardValue, fromIndex, opts={}){
   if (!state.roomCode) return;
+  const advanceTurn = opts.advanceTurn !== false;
 
   const moveId = crypto.randomUUID();
 
@@ -2200,21 +2279,25 @@ async function moveCardToNextPlayer(fromId, toId, cardValue, fromIndex){
     set(ref(db, `rooms/${state.roomCode}/hands/${toId}/cards`), toCards),
   ]);
 
-  const nextId = getNextPlayerId(fromId);
-  if (nextId){
-    const turnId = crypto.randomUUID();
-    await Promise.all([
-      set(ref(db, `rooms/${state.roomCode}/activeTurn`), { id: turnId, playerId: nextId, at: Date.now() }),
-      remove(ref(db, `rooms/${state.roomCode}/turnDrawnTurnId`))
-    ]);
-  }
-
+  if (advanceTurn) await advanceTurnFromPlayer(fromId);
   return { moveId, updated:true, expectedToCount: toCards.length };
 }
 
-/* ✅ DB更新：デッキへ（横向きで残す） + 「議論開始！」イベント発火 */
-async function moveCardToDeck(fromId, cardValue, fromIndex){
+async function advanceTurnFromPlayer(fromId){
+  const nextId = getNextPlayerId(fromId);
+  if (!nextId) return;
+  const turnId = crypto.randomUUID();
+  await Promise.all([
+    set(ref(db, `rooms/${state.roomCode}/activeTurn`), { id: turnId, playerId: nextId, at: Date.now() }),
+    remove(ref(db, `rooms/${state.roomCode}/turnDrawnTurnId`))
+  ]);
+}
+
+/* ✅ DB更新：デッキへ（横向きで残す） */
+async function moveCardToDeck(fromId, cardValue, fromIndex, opts={}){
   if (!state.roomCode) return;
+  const advanceTurn = opts.advanceTurn !== false;
+  const triggerDiscussion = opts.triggerDiscussion !== false;
 
   const dropId = crypto.randomUUID();
   await set(ref(db, `rooms/${state.roomCode}/deckDropEvent`), {
@@ -2246,21 +2329,15 @@ async function moveCardToDeck(fromId, cardValue, fromIndex){
     set(ref(db, `rooms/${state.roomCode}/deckParked`), { id: dropId, card: removed, by: fromId, at: Date.now() }),
   ]);
 
-  const nextId = getNextPlayerId(fromId);
-  if (nextId){
-    const turnId = crypto.randomUUID();
-    await Promise.all([
-      set(ref(db, `rooms/${state.roomCode}/activeTurn`), { id: turnId, playerId: nextId, at: Date.now() }),
-      remove(ref(db, `rooms/${state.roomCode}/turnDrawnTurnId`))
-    ]);
-  }
+  if (advanceTurn) await advanceTurnFromPlayer(fromId);
 
-  // ✅ ここで全員に「議論開始！」ポップを流す
-  await set(ref(db, `rooms/${state.roomCode}/discussionPopEvent`), {
-    id: crypto.randomUUID(),
-    by: fromId,
-    at: Date.now()
-  });
+  if (triggerDiscussion){
+    await set(ref(db, `rooms/${state.roomCode}/discussionPopEvent`), {
+      id: crypto.randomUUID(),
+      by: fromId,
+      at: Date.now()
+    });
+  }
 
   return { dropId, updated:true };
 }
@@ -2270,21 +2347,53 @@ async function moveCardToDeck(fromId, cardValue, fromIndex){
    ========================= */
 function bindMyHandDrag(){
   myHandEl.addEventListener('pointerdown', (e) => {
-    const cardElInHand = e.target?.closest?.('.my-card');
-    if (!cardElInHand) return;
     if (!canDragNow()) return;
 
-    const myId = state.userId;
-    const cards = Array.isArray(state.hands?.[myId]?.cards) ? state.hands[myId].cards : [];
-    const cardValue = cardElInHand.textContent;
+    const miniEl = state.sp3Mode?.phase === 'pickDiscard' ? e.target?.closest?.('.mini-card') : null;
+    const myCardEl = e.target?.closest?.('.my-card');
+    let cardElInHand = myCardEl;
+    let sourcePlayerId = state.userId;
 
-    const myCardEls = Array.from(myHandEl.querySelectorAll('.my-card'));
-    const domIndex = myCardEls.indexOf(cardElInHand);
-    const fromIndex = clamp(domIndex, 0, Math.max(0, cards.length-1));
+    if (!cardElInHand && miniEl){
+      const tag = miniEl.closest('.player-tag');
+      const playerId = tag?.dataset.playerid;
+      const idx = Number(miniEl.dataset.cardIndex ?? -1);
+      const cards = Array.isArray(state.hands?.[playerId]?.cards) ? state.hands[playerId].cards : [];
+      const cardValue = cards[idx];
+      if (!playerId || idx < 0 || normalizeSp3(cardValue) === SP3_NAME) return;
 
-    const ph = document.createElement('div');
+      cardElInHand = document.createElement('div');
+      cardElInHand.className = 'my-card as-back';
+      cardElInHand.textContent = cardValue;
+      cardElInHand.style.position = 'fixed';
+      const r = miniEl.getBoundingClientRect();
+      cardElInHand.style.left = `${r.left}px`;
+      cardElInHand.style.top = `${r.top}px`;
+      document.body.appendChild(cardElInHand);
+      sourcePlayerId = playerId;
+    }
+
+    if (!cardElInHand) return;
+
+    const sourceCards = Array.isArray(state.hands?.[sourcePlayerId]?.cards) ? state.hands[sourcePlayerId].cards : [];
+    const cardValue = myCardEl ? cardElInHand.textContent : (sourceCards[Number(miniEl.dataset.cardIndex ?? -1)]);
+
+    if (state.sp3Mode?.phase === 'pickDiscard' && normalizeSp3(cardValue) === SP3_NAME) return;
+
+    let fromIndex = 0;
+    let ph = document.createElement('div');
     ph.className = 'drag-placeholder';
-    cardElInHand.insertAdjacentElement('beforebegin', ph);
+
+    if (myCardEl){
+      const myCardEls = Array.from(myHandEl.querySelectorAll('.my-card'));
+      const domIndex = myCardEls.indexOf(cardElInHand);
+      fromIndex = clamp(domIndex, 0, Math.max(0, sourceCards.length-1));
+      cardElInHand.insertAdjacentElement('beforebegin', ph);
+    } else {
+      fromIndex = Number(miniEl.dataset.cardIndex ?? 0);
+      document.body.appendChild(ph);
+      ph.style.display = 'none';
+    }
 
     const stable = computeStableGrabOffsets(cardElInHand, e.clientX, e.clientY);
     const offsetX = stable.offsetX;
@@ -2293,7 +2402,7 @@ function bindMyHandDrag(){
     const dragEl = cardElInHand;
     document.body.appendChild(dragEl);
     dragEl.classList.add('dragging');
-    dragEl.classList.remove('as-back','fx-hold');
+    dragEl.classList.remove('fx-hold');
     dragEl.style.width = `${stable.baseW}px`;
     dragEl.style.height = `${stable.baseH}px`;
     dragEl.style.visibility = 'visible';
@@ -2313,7 +2422,9 @@ function bindMyHandDrag(){
       placeholder: ph,
       offsetX, offsetY,
       cardValue,
-      fromIndex
+      fromIndex,
+      sourcePlayerId,
+      isTempSource: !myCardEl
     };
 
     e.preventDefault();
@@ -2329,11 +2440,18 @@ function bindMyHandDrag(){
     if (!drag) return;
     if (e.pointerId !== drag.pointerId) return;
 
-    const { dragEl, placeholder, cardValue, fromIndex, offsetX, offsetY } = drag;
+    const { dragEl, placeholder, cardValue, fromIndex, offsetX, offsetY, sourcePlayerId, isTempSource } = drag;
     drag = null;
 
     let target = null;
-    if (isLastTurnPlayer(state.userId)){
+    if (state.sp3Mode?.phase === 'pickDiscard'){
+      const r = myHandEl.getBoundingClientRect();
+      const c = rectCenter(r);
+      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (inside) target = { type:'sp3hand', centerClient:c, playerId:state.userId };
+    } else if (state.sp3Mode?.phase === 'sendDeck'){
+      target = getDropTargetForDeck(e.clientX, e.clientY);
+    } else if (isLastTurnPlayer(state.userId)){
       target = getDropTargetForDeck(e.clientX, e.clientY);
     } else {
       target = getDropTargetForNextPlayer(e.clientX, e.clientY);
@@ -2341,12 +2459,13 @@ function bindMyHandDrag(){
 
     if (!target){
       try{
-        dragEl.classList.remove('dragging','as-back','fx-hold');
+        dragEl.classList.remove('dragging','as-back','fx-hold','sp3-pulse');
         dragEl.style.pointerEvents = '';
         dragEl.style.transform = '';
         dragEl.style.width = '';
         dragEl.style.height = '';
-        placeholder.replaceWith(dragEl);
+        if (!isTempSource) placeholder.replaceWith(dragEl);
+        else dragEl.remove();
       }catch{
         try{ dragEl.remove(); }catch{}
       }
@@ -2396,13 +2515,31 @@ function bindMyHandDrag(){
     };
 
     if (target.type === 'deck'){
-      const res = await moveCardToDeck(state.userId, cardValue, fromIndex);
+      const deckOpts = state.sp3Mode?.phase === 'sendDeck'
+        ? { advanceTurn:false, triggerDiscussion:false }
+        : undefined;
+      const res = await moveCardToDeck(sourcePlayerId, cardValue, fromIndex, deckOpts);
       registerTransit(`selfdeck:${res.dropId}`, dragEl, '__deck__', 0, 900);
+
+      if (state.sp3Mode?.phase === 'sendDeck'){
+        clearSp3Hints();
+        state.sp3Mode = null;
+        await advanceTurnFromPlayer(state.userId);
+      }
+    } else if (target.type === 'sp3hand'){
+      const beforeToCount = handCount(state.userId);
+      const result = await moveCardToPlayer(sourcePlayerId, state.userId, cardValue, fromIndex, { advanceTurn:false });
+      const expectedToCount = Math.max(beforeToCount + 1, result?.expectedToCount ?? (beforeToCount + 1));
+      registerTransit(`sp3:${result.moveId}:${state.userId}`, dragEl, state.userId, expectedToCount, 2600);
+      startSp3Phase2();
     } else {
       const beforeToCount = handCount(target.playerId);
-      const result = await moveCardToNextPlayer(state.userId, target.playerId, cardValue, fromIndex);
+      const moveOpts = normalizeSp3(cardValue) === SP3_NAME ? { advanceTurn:false } : undefined;
+      const result = await moveCardToPlayer(state.userId, target.playerId, cardValue, fromIndex, moveOpts);
       const expectedToCount = Math.max(beforeToCount + 1, result?.expectedToCount ?? (beforeToCount + 1));
       registerTransit(`selfmove:${result.moveId}:${target.playerId}`, dragEl, target.playerId, expectedToCount, 2600);
+
+      if (normalizeSp3(cardValue) === SP3_NAME) startSp3Phase1();
     }
 
     state.pendingOutgoing = null;
@@ -2415,16 +2552,17 @@ function bindMyHandDrag(){
     if (!drag) return;
     if (e.pointerId !== drag.pointerId) return;
 
-    const { dragEl, placeholder } = drag;
+    const { dragEl, placeholder, isTempSource } = drag;
     drag = null;
 
     try{
-      dragEl.classList.remove('dragging','as-back','fx-hold');
+      dragEl.classList.remove('dragging','as-back','fx-hold','sp3-pulse');
       dragEl.style.pointerEvents = '';
       dragEl.style.transform = '';
       dragEl.style.width = '';
       dragEl.style.height = '';
-      placeholder.replaceWith(dragEl);
+      if (!isTempSource) placeholder.replaceWith(dragEl);
+      else dragEl.remove();
     }catch{
       try{ dragEl.remove(); }catch{}
     }
@@ -2468,6 +2606,8 @@ btnGameStart.addEventListener('click', async () => {
     lastTurnId = null;
 
     state.pendingOutgoing = null;
+    state.sp3Mode = null;
+    clearSp3Hints();
 
     for (const [,t] of state.inTransit.entries()){
       try{ t.el.remove(); }catch{}
