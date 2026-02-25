@@ -3100,9 +3100,23 @@ function waitForExplorationPickEvent({ eventId, rank, playerId } = {}){
 }
 
 function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
-  if (activePlayerId !== state.userId){
+  const hasActivePlayerHand = !!state.hands?.[activePlayerId];
+  const activePlayerMissingFromSeats = activePlayerId
+    ? !latestPlayers.some((p) => p.id === activePlayerId)
+    : false;
+  const canProxyExplorationSelection = (
+    activePlayerId &&
+    activePlayerId !== state.userId &&
+    !hasActivePlayerHand &&
+    activePlayerMissingFromSeats &&
+    state.turn?.currentPlayerId === state.userId
+  );
+
+  if (activePlayerId !== state.userId && !canProxyExplorationSelection){
     return waitForExplorationPickEvent({ eventId, rank, playerId: activePlayerId });
   }
+
+  const pickEventPlayerId = canProxyExplorationSelection ? activePlayerId : state.userId;
 
   return new Promise((resolve) => {
     const pickables = [];
@@ -3130,7 +3144,7 @@ function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
       await emitExplorationPickEvent({
         eventId,
         rank,
-        playerId: state.userId,
+        playerId: pickEventPlayerId,
         value: selection?.value ?? null,
         sourceType: selection?.sourceType ?? null,
         sourcePlayerId: selection?.sourcePlayerId ?? null,
