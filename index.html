@@ -3245,26 +3245,28 @@ async function runExplorationPhaseSequence(eventId){
     const groups = getExplorationGroups();
     for (const group of groups){
       if (explorationStopRequested || state.gameOver) return;
-      if (!group.players.length) continue;
+      const liveGroup = getExplorationGroups().find((g) => g.rank === group.rank) || group;
+      const groupPlayers = Array.isArray(liveGroup.players) ? liveGroup.players : [];
+      if (!groupPlayers.length) continue;
 
-      group.players.forEach((pid) => {
+      groupPlayers.forEach((pid) => {
         setPlayerHandReveal(pid, true, { flip: pid === state.userId });
         revealedPlayers.add(pid);
       });
 
-      if (group.players.length > 1){
-        if (group.players.includes(state.userId)){
+      if (groupPlayers.length > 1){
+        if (groupPlayers.includes(state.userId)){
           await sleep(EXPLORATION_SKIP_DELAY_MS);
         } else {
           await sleep(140);
-          group.players.forEach((pid) => setExplorationTieShake(pid, true));
+          groupPlayers.forEach((pid) => setExplorationTieShake(pid, true));
           await sleep(1500);
-          group.players.forEach((pid) => setExplorationTieShake(pid, false));
+          groupPlayers.forEach((pid) => setExplorationTieShake(pid, false));
         }
         continue;
       }
 
-      const pid = group.players[0];
+      const pid = groupPlayers[0];
       if (playerHandHasFive(pid)){
         await sleep(920);
         const cards = Array.isArray(state.hands?.[pid]?.cards) ? state.hands[pid].cards : [];
