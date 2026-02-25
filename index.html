@@ -3085,13 +3085,14 @@ function revealExplorationPickFromEvent(ev){
 function waitForExplorationPickEvent({ eventId, rank, playerId } = {}){
   if (!state.roomCode) return Promise.resolve(null);
   return new Promise((resolve) => {
+    const expectedPlayerId = playerId ? resolvePlayerAlias(playerId) : null;
     const evRef = ref(db, `rooms/${state.roomCode}/explorationPickEvent`);
     const unsubscribe = onValue(evRef, (snap) => {
       const ev = snap.val();
       if (!ev || !ev.id) return;
       if (eventId && ev.eventId !== eventId) return;
       if (Number.isFinite(rank) && ev.rank !== rank) return;
-      if (playerId && ev.playerId !== playerId) return;
+      if (expectedPlayerId && resolvePlayerAlias(ev.playerId) !== expectedPlayerId) return;
       revealExplorationPickFromEvent(ev);
       unsubscribe();
       resolve(ev);
@@ -3100,8 +3101,9 @@ function waitForExplorationPickEvent({ eventId, rank, playerId } = {}){
 }
 
 function waitForExplorationSelection(activePlayerId, { eventId, rank } = {}){
-  if (activePlayerId !== state.userId){
-    return waitForExplorationPickEvent({ eventId, rank, playerId: activePlayerId });
+  const resolvedActivePlayerId = resolvePlayerAlias(activePlayerId);
+  if (resolvedActivePlayerId !== state.userId){
+    return waitForExplorationPickEvent({ eventId, rank, playerId: resolvedActivePlayerId });
   }
 
   return new Promise((resolve) => {
@@ -3307,7 +3309,19 @@ async function runExplorationPhaseSequence(eventId){
 
 let isRenderingSeatTabs = false;
 let latestPlayers = [];
+let latestPlayersBySeat = new Map();
 let pendingTakeover = null;
+const playerIdAliasMap = new Map();
+
+function resolvePlayerAlias(playerId){
+  let resolved = playerId;
+  const visited = new Set();
+  while (resolved && playerIdAliasMap.has(resolved) && !visited.has(resolved)){
+    visited.add(resolved);
+    resolved = playerIdAliasMap.get(resolved);
+  }
+  return resolved;
+}
 
 let prevIsMyTurn = false;
 let autoDrawInFlight = false;
@@ -3430,7 +3444,8 @@ function calcIsPlayable(){
 }
 
 function updateTurnUI(){
-  state.isMyTurn = !!state.turn.currentPlayerId && (state.turn.currentPlayerId === state.userId);
+  const currentTurnPlayerId = resolvePlayerAlias(state.turn.currentPlayerId);
+  state.isMyTurn = !!currentTurnPlayerId && (currentTurnPlayerId === state.userId);
   state.isPlayable = calcIsPlayable();
 
   myHandEl.classList.toggle('is-playable', state.isPlayable);
@@ -9792,6 +9807,14 @@ function subscribePlayers(){
       .map(([seatIndex, t]) => (t && t.playerId ? { id:t.playerId, name:t.playerName||'名無し', seatIndex:Number(seatIndex) } : null))
       .filter(Boolean)
       .sort((a,b) => a.seatIndex - b.seatIndex);
+
+    const nextPlayersBySeat = new Map(players.map((p) => [p.seatIndex, p.id]));
+    latestPlayersBySeat.forEach((prevPlayerId, seatIndex) => {
+      const nextPlayerId = nextPlayersBySeat.get(seatIndex);
+      if (!prevPlayerId || !nextPlayerId || prevPlayerId === nextPlayerId) return;
+      playerIdAliasMap.set(prevPlayerId, nextPlayerId);
+    });
+    latestPlayersBySeat = nextPlayersBySeat;
 
     latestPlayers = players;
 
